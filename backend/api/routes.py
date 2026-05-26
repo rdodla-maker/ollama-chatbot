@@ -44,6 +44,19 @@ async def root():
         "message": "RAG AI Backend Running",
         "version": "3.0.0",
         "agent_mode": "langgraph" if settings.use_langgraph_agent else "legacy",
+        "model": settings.ollama_model,
+        "ollama_url": settings.ollama_base_url,
+    }
+
+
+@router.get("/memory")
+async def get_memory():
+    """Return agent long-term memory entries for the UI."""
+    from memory.store import memory_store
+
+    return {
+        "entries": list(reversed(memory_store.entries)),
+        "count": len(memory_store.entries),
     }
 
 

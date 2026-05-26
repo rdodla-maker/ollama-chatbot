@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
 
 export const api = axios.create({
   baseURL: API_BASE,
@@ -8,17 +8,17 @@ export const api = axios.create({
   timeout: 180000,
 })
 
-export async function healthCheck() {
+export async function getHealth() {
   const { data } = await api.get('/')
   return data
 }
 
-export async function sendChat(message) {
+export async function postChat(message) {
   const { data } = await api.post('/chat', { message })
   return data
 }
 
-export async function sendAgent(message) {
+export async function postAgent(message) {
   const { data } = await api.post('/agent', { message })
   return data
 }
@@ -42,12 +42,41 @@ export async function indexCodebase() {
   return data
 }
 
-/**
- * Stream chat tokens via SSE from POST /chat/stream
- */
-export function streamChat(message, { onToken, onDone, onError }) {
+export async function getMemory() {
+  const { data } = await api.get('/memory')
+  return data
+}
+
+export async function getPendingChanges() {
+  const { data } = await api.get('/pending-changes')
+  return data
+}
+
+export async function approveChange(id) {
+  const { data } = await api.post(`/pending-changes/${id}/approve`)
+  return data
+}
+
+export async function rejectChange(id) {
+  const { data } = await api.post(`/pending-changes/${id}/reject`)
+  return data
+}
+
+function parseSseLines(buffer, line, handlers) {
+  if (!line.startsWith('data: ')) return buffer
+  try {
+    const payload = JSON.parse(line.slice(6))
+    handlers(payload)
+  } catch {
+    /* ignore */
+  }
+  return buffer
+}
+
+export function streamChat(message, handlers) {
   const url = `${API_BASE}/chat/stream`
   const controller = new AbortController()
+  const { onToken, onDone, onError } = handlers
 
   fetch(url, {
     method: 'POST',
@@ -63,7 +92,6 @@ export function streamChat(message, { onToken, onDone, onError }) {
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -73,15 +101,15 @@ export function streamChat(message, { onToken, onDone, onError }) {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
           try {
-            const payload = JSON.parse(line.slice(6))
-            if (payload.error) {
-              onError?.(payload.error)
+            const p = JSON.parse(line.slice(6))
+            if (p.error) {
+              onError?.(p.error)
               return
             }
-            if (payload.token) onToken?.(payload.token)
-            if (payload.done) onDone?.()
+            if (p.token) onToken?.(p.token)
+            if (p.done) onDone?.()
           } catch {
-            /* ignore parse errors */
+            /* ignore */
           }
         }
       }
@@ -92,27 +120,10 @@ export function streamChat(message, { onToken, onDone, onError }) {
   return () => controller.abort()
 }
 
-export async function fetchPendingChanges() {
-  const { data } = await api.get('/pending-changes')
-  return data
-}
-
-export async function approveChange(changeId) {
-  const { data } = await api.post(`/pending-changes/${changeId}/approve`)
-  return data
-}
-
-export async function rejectChange(changeId) {
-  const { data } = await api.post(`/pending-changes/${changeId}/reject`)
-  return data
-}
-
-/**
- * Stream agent events: plan, reasoning steps, tokens, done
- */
-export function streamAgent(message, { onPlan, onReasoning, onToken, onDone, onError }) {
+export function streamAgent(message, handlers) {
   const url = `${API_BASE}/agent/stream`
   const controller = new AbortController()
+  const { onPlan, onReasoning, onToken, onDone, onError } = handlers
 
   fetch(url, {
     method: 'POST',
@@ -128,7 +139,6 @@ export function streamAgent(message, { onPlan, onReasoning, onToken, onDone, onE
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -138,15 +148,15 @@ export function streamAgent(message, { onPlan, onReasoning, onToken, onDone, onE
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
           try {
-            const payload = JSON.parse(line.slice(6))
-            if (payload.type === 'error' || payload.message) {
-              onError?.(payload.message || payload.error || 'Agent error')
+            const p = JSON.parse(line.slice(6))
+            if (p.type === 'error' || (p.message && !p.type)) {
+              onError?.(p.message || p.error || 'Agent error')
               return
             }
-            if (payload.type === 'plan') onPlan?.(payload.content)
-            if (payload.type === 'reasoning') onReasoning?.(payload.step)
-            if (payload.type === 'token') onToken?.(payload.content)
-            if (payload.type === 'done') onDone?.(payload)
+            if (p.type === 'plan') onPlan?.(p.content)
+            if (p.type === 'reasoning') onReasoning?.(p.step)
+            if (p.type === 'token') onToken?.(p.content)
+            if (p.type === 'done') onDone?.(p)
           } catch {
             /* ignore */
           }
