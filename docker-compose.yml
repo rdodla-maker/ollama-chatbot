@@ -1,0 +1,46 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3
+      ALLOWED_FS_ROOT: /app/project
+      CHROMA_PATH: /app/data/chroma_db
+      UPLOAD_DIR: /app/data/uploads
+      CORS_ORIGINS: http://localhost:5173,http://localhost:80,http://127.0.0.1:5173
+      USE_LANGGRAPH_AGENT: "true"
+      ENABLE_SHELL_TOOL: "false"
+    volumes:
+      - ./backend:/app/backend
+      - ./data:/app/data
+      - .:/app/project:ro
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
