@@ -16,15 +16,33 @@ from core.logging_config import get_logger
 from models.schemas import (
     AgentRequest,
     AgentResponse,
+    ApplicationTrackerResponse,
     ChatRequest,
     ChatResponse,
     CodebaseIndexResponse,
+    GenerateApplicationRequest,
+    GenerateApplicationResponse,
     SourceChunk,
     UploadResponse,
+    ResumeUploadResponse,
+    AnalyzeResumeRequest,
+    AnalyzeResumeResponse,
+    WorkflowStatusResponse,
 )
 from rag.codebase_index import index_codebase
 from rag.vector_store import ingest_pdf, search_chunks_with_metadata
 from services.ollama_service import generate_completion, stream_completion
+from services.application_service import generate_application_materials
+from services.application_tracking_service import (
+    append_application_record,
+    list_application_records,
+)
+from services.google_sheets_service import append_application_to_sheet
+from services.resume_parsing_service import extract_text_from_resume
+from services.profile_store import create_profile, update_profile, list_profiles
+import uuid
+from pathlib import Path
+import json
 
 logger = get_logger("api")
 
@@ -99,6 +117,163 @@ async def upload_pdf(file: UploadFile = File(...)):
     except Exception as exc:
         logger.exception("Upload failed")
         raise HTTPException(status_code=500, detail="Failed to process PDF upload.") from exc
+
+
+
+@router.post("/upload-resume", response_model=ResumeUploadResponse)
+async def upload_resume(file: UploadFile = File(...)):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided.")
+    if not (file.filename.lower().endswith('.pdf') or file.filename.lower().endswith('.docx') or file.filename.lower().endswith('.doc')):
+        raise HTTPException(status_code=400, detail="Only PDF/DOCX files are allowed.")
+
+    safe_name = _safe_filename(file.filename)
+    upload_dir = Path(settings.upload_dir) / "resumes"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    uid = str(uuid.uuid4())
+    file_path = upload_dir / f"{uid}_{safe_name}"
+
+    try:
+        content = await file.read()
+        max_bytes = settings.max_upload_mb * 1024 * 1024
+        if len(content) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Max size: {settings.max_upload_mb} MB.",
+            )
+
+        # Basic MIME/content type validation
+        ctype = getattr(file, "content_type", "") or ""
+        if ctype and not (
+            ctype.startswith("application/pdf") or "word" in ctype or ctype == "application/octet-stream"
+        ):
+            raise HTTPException(status_code=400, detail=f"Unsupported content type: {ctype}")
+
+        file_path.write_bytes(content)
+
+        # parse resume text (best-effort)
+        try:
+            parsed_text, ftype = await asyncio.to_thread(extract_text_from_resume, str(file_path))
+        except Exception as exc:
+            logger.exception("Resume parse failed on upload")
+            parsed_text = ""
+
+        # create profile placeholder (DB-backed if configured)
+        profile = await asyncio.to_thread(create_profile, file_path.name, parsed_text, [])
+
+        # enqueue background analysis task (placeholder)
+        try:
+            from services.task_queue import enqueue_task
+
+            enqueue_task({"type": "analyze_resume", "upload_id": file_path.name})
+        except Exception:
+            logger.debug("Task queue not available; skipping enqueue")
+
+        return ResumeUploadResponse(upload_id=file_path.name, filename=file_path.name, parsed_snippet=(parsed_text or "")[:1000])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Resume upload failed")
+        raise HTTPException(status_code=500, detail="Failed to upload resume.") from exc
+
+
+
+@router.post("/analyze-resume", response_model=AnalyzeResumeResponse)
+async def analyze_resume(body: AnalyzeResumeRequest):
+    # Validate roles
+    roles = body.target_roles or []
+    if len(roles) > 5:
+        raise HTTPException(status_code=400, detail="A maximum of 5 target roles is allowed.")
+
+    # obtain resume text
+    resume_text = None
+    upload_id = body.upload_id
+    if upload_id:
+        candidate = Path(settings.upload_dir) / "resumes" / upload_id
+        if not candidate.exists():
+            raise HTTPException(status_code=404, detail="Upload not found")
+        try:
+            resume_text, _ = await asyncio.to_thread(extract_text_from_resume, str(candidate))
+        except Exception:
+            resume_text = candidate.read_text(encoding="utf-8", errors="ignore")[:10000]
+    elif body.resume_text:
+        resume_text = body.resume_text
+    else:
+        raise HTTPException(status_code=400, detail="No resume text or upload_id provided.")
+
+    prompt = (
+        "You are an expert recruiter and resume analyst. Given a candidate resume and target roles, produce a single valid JSON object with the following keys:\n"
+        "- skills: list of candidate skills (strings)\n"
+        "- projects: list of short project summaries (strings)\n"
+        "- education: list of education entries (strings)\n"
+        "- certifications: list of certifications (strings)\n"
+        "- experience: list of experience summaries (strings)\n"
+        "- strengths: list of strengths (strings)\n"
+        "- missing_skills: list of skills this candidate should acquire for the target roles\n"
+        "- role_compatibility: mapping of role -> score (0-100) and explanation\n"
+        "- ats_score: numeric 0-100 overall resume ATS compatibility\n"
+        "- recommendations: list of prioritized improvement suggestions (strings)\n"
+        "Output ONLY valid JSON and nothing else.\n\n"
+        f"TARGET_ROLES: {roles}\n\nRESUME:\n{resume_text[:12000]}\n\n"
+    )
+
+    try:
+        ai_response = await generate_completion(prompt)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    parsed = None
+    ats_score = None
+    role_compat = None
+    try:
+        parsed = json.loads(ai_response)
+        ats_score = parsed.get("ats_score") if isinstance(parsed, dict) else None
+        role_compat = parsed.get("role_compatibility") if isinstance(parsed, dict) else None
+    except Exception:
+        parsed = None
+
+    profile_obj = {
+        "analysis_raw": ai_response,
+        "parsed": parsed,
+        "target_roles": roles,
+        "ats_score": ats_score,
+        "status": "analyzed",
+    }
+
+    profile_id = None
+    if upload_id:
+        # try to find profile and update it
+        try:
+            # repository-backed list_profiles will return structured dicts
+            records = await asyncio.to_thread(list_profiles)
+            for r in records:
+                if r.get("uploaded_filename") == upload_id:
+                    await asyncio.to_thread(update_profile, r.get("id"), profile_obj)
+                    profile_id = r.get("id")
+                    break
+        except Exception:
+            logger.exception("Failed updating profile in store")
+
+    return AnalyzeResumeResponse(upload_id=upload_id, profile_id=profile_id, analysis_raw=ai_response, parsed=parsed, ats_score=ats_score, role_compatibility=role_compat)
+
+
+
+@router.get("/workflow-status", response_model=WorkflowStatusResponse)
+async def workflow_status():
+    records = await asyncio.to_thread(list_profiles)
+    items = []
+    for r in records:
+        items.append(
+            {
+                "id": r.get("id"),
+                "uploaded_filename": r.get("uploaded_filename"),
+                "created_at": r.get("created_at"),
+                "status": r.get("status"),
+                "target_roles": r.get("target_roles") or [],
+                "profile": r.get("profile"),
+            }
+        )
+    return WorkflowStatusResponse(profiles=items)
 
 
 @router.post("/index-codebase", response_model=CodebaseIndexResponse)
@@ -243,3 +418,32 @@ async def agent_stream(body: AgentRequest):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/generate-application", response_model=GenerateApplicationResponse)
+async def generate_application(body: GenerateApplicationRequest):
+    try:
+        result = await generate_application_materials(body)
+        record = await asyncio.to_thread(
+            append_application_record,
+            body.company,
+            body.role,
+            result["generated_email"],
+            result["generated_cover_letter"],
+        )
+        await asyncio.to_thread(append_application_to_sheet, record)
+        return GenerateApplicationResponse(**result)
+    except OllamaConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Generate application endpoint failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate application materials.",
+        ) from exc
+
+
+@router.get("/application-tracker", response_model=ApplicationTrackerResponse)
+async def application_tracker():
+    records = await asyncio.to_thread(list_application_records)
+    return ApplicationTrackerResponse(applications=records)

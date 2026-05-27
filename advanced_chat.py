@@ -1,4 +1,4 @@
-import requests
+import httpx
 import json
 import os
 from datetime import datetime
@@ -91,27 +91,18 @@ while True:
         "stream": True
     }
 
-    response = requests.post(
-        OLLAMA_URL,
-        json=payload,
-        stream=True
-    )
-
-    print(f"\n{AI_COLOR}AI: {RESET_COLOR}", end="")
-
-    full_response = ""
-
-    for line in response.iter_lines():
-
-        if line:
-
-            data = json.loads(line)
-
-            token = data.get("response", "")
-
-            full_response += token
-
-            print(token, end="", flush=True)
+    with httpx.stream("POST", OLLAMA_URL, json=payload, timeout=None) as resp:
+        print(f"\n{AI_COLOR}AI: {RESET_COLOR}", end="")
+        full_response = ""
+        for line in resp.iter_lines():
+            if line:
+                try:
+                    data = json.loads(line)
+                except Exception:
+                    continue
+                token = data.get("response", "")
+                full_response += token
+                print(token, end="", flush=True)
 
     print("\n")
 

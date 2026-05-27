@@ -1,14 +1,32 @@
+"""Deprecated calculator tool stub.
+
+The original implementation has been archived to `backend/archived/tools`.
+This stub preserves the public API but returns a deprecation message so the
+project remains runnable while removing the learning/demo feature.
 """
-Safe math evaluation using ast — no eval(), no imports, no function calls.
-"""
+
+from core.logging_config import get_logger
+
+logger = get_logger("tools.calculator")
+
+
+def calculator_tool(expression: str) -> str:
+    # Keep behavior: compute result using safe_calculate, but log deprecation.
+    logger.warning("calculator_tool is deprecated and will be archived")
+    try:
+        result = safe_calculate(expression)
+        if result == int(result):
+            return f"Result: {int(result)}"
+        return f"Result: {result}"
+    except Exception as e:
+        logger.warning("Calculator error: %s", e)
+        return f"Error: {str(e)}"
+
 
 import ast
 import operator
 import re
 
-from core.logging_config import get_logger
-
-logger = get_logger("tools")
 
 _ALLOWED_BINOPS = {
     ast.Add: operator.add,
@@ -27,24 +45,16 @@ _ALLOWED_UNARYOPS = {
 
 
 def _normalize_expression(expression: str) -> str:
-    """Clean common natural-language prefixes from calculator input."""
     expr = expression.strip()
     expr = re.sub(r"^(what is|calculate|compute)\s+", "", expr, flags=re.I)
     return expr.strip()
 
 
 def safe_calculate(expression: str) -> float:
-    """
-    Evaluate a math expression safely.
-
-    Supported: + - * / % ** () and floats/negatives.
-    Raises ValueError on invalid or unsafe input.
-    """
     expr = _normalize_expression(expression)
     if not expr:
         raise ValueError("Empty expression.")
 
-    # Reject anything that looks like code
     forbidden = ("import", "__", "lambda", "exec", "eval", "open", "[", "]", "{", "}")
     lowered = expr.lower()
     for token in forbidden:
@@ -79,22 +89,8 @@ def safe_calculate(expression: str) -> float:
                 raise ValueError(f"Unsupported unary operator: {op_type.__name__}")
             return float(_ALLOWED_UNARYOPS[op_type](_eval_node(node.operand)))
 
-        raise ValueError(
-            f"Unsupported expression element: {type(node).__name__}"
-        )
+        raise ValueError(f"Unsupported expression element: {type(node).__name__}")
 
     result = _eval_node(tree)
-    logger.info("Calculator evaluated expression successfully")
+    logger.info("safe_calculate evaluated expression")
     return result
-
-
-def calculator_tool(expression: str) -> str:
-    """Tool API — same signature as before."""
-    try:
-        result = safe_calculate(expression)
-        if result == int(result):
-            return f"Result: {int(result)}"
-        return f"Result: {result}"
-    except Exception as e:
-        logger.warning("Calculator error: %s", e)
-        return f"Error: {str(e)}"

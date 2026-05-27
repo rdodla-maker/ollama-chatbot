@@ -1,3 +1,90 @@
+"""Stream agentic loop events for SSE consumers.
+
+Yields dict events with types: 'plan', 'reasoning', 'observation', 'token', 'done'.
+"""
+
+from collections.abc import Iterator
+
+from core.logging_config import get_logger
+from core.config import settings
+from agent.router import decide_tool
+from langchain_ollama.llms import OllamaLLM
+from memory.store import memory_store
+from tools import (
+    calculator_tool,
+    file_reader_tool,
+    folder_scanner_tool,
+    pdf_search_tool,
+)
+from tools.codebase_tools import codebase_search_tool
+from executor import execute_task
+
+logger = get_logger("agent.stream")
+llm = OllamaLLM(model=settings.ollama_model)
+
+
+def stream_agent(question: str) -> Iterator[dict]:
+    plan = f"Plan for: {question}"
+    yield {"type": "plan", "content": plan}
+
+    memory_context = memory_store.get_context_for_query(question)
+
+    for step in range(settings.agent_max_iterations):
+        routing = decide_tool(question)
+        tool = routing.get("tool", "none")
+        args = routing.get("args", {}) or {}
+
+        yield {"type": "reasoning", "step": f"Step {step+1}: selected {tool}"}
+
+        if tool == "none":
+            yield {"type": "reasoning", "step": "No tool selected; finishing."}
+            break
+
+        try:
+            if tool == "calculator":
+                expr = args.get("expression") or question
+                obs = calculator_tool(expr)
+            elif tool == "pdf_search":
+                q = args.get("query") or question
+                obs = pdf_search_tool(q)
+            elif tool == "file_read":
+                path = args.get("path") or ""
+                obs = file_reader_tool(path)
+            elif tool == "folder_scan":
+                path = args.get("path") or ""
+                obs = folder_scanner_tool(path)
+            elif tool == "code_search":
+                q = args.get("query") or question
+                obs = codebase_search_tool(q)
+            elif tool == "execute":
+                obs = execute_task(question)
+            else:
+                obs = f"Unknown tool: {tool}"
+        except Exception as exc:
+            obs = f"Tool error: {exc}"
+            logger.exception("Tool error")
+
+        yield {"type": "observation", "content": str(obs)}
+
+        # Let the model decide to continue or finish
+        moderator = llm.invoke(
+            f"Decide to CONTINUE or FINISH for question: {question}\nObservation: {obs}\nMemory: {memory_context}"
+        )
+
+        if moderator.strip().upper().startswith("FINISH"):
+            # produce final answer
+            final = llm.invoke(f"Answer the question using observations:\n{obs}\nMemory:\n{memory_context}\nQuestion:\n{question}")
+            # Stream final as token chunks (simple split)
+            for i in range(0, len(final), 200):
+                yield {"type": "token", "content": final[i:i+200]}
+            yield {"type": "done", "response": final, "plan": plan}
+            return
+
+    # Max iterations reached
+    final = llm.invoke(f"Max iterations reached; answer:\nQuestion: {question}\nObservations:\n{obs}")
+    for i in range(0, len(final), 200):
+        yield {"type": "token", "content": final[i:i+200]}
+    yield {"type": "done", "response": final, "plan": plan}
 """
 Stream agent execution events for SSE (/agent/stream).
 """

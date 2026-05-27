@@ -23,6 +23,40 @@ export async function postAgent(message) {
   return data
 }
 
+export async function generateApplication(payload) {
+  const { data } = await api.post('/generate-application', payload)
+  return data
+}
+
+export async function uploadResume(file, onProgress) {
+  const form = new FormData()
+  form.append('file', file)
+  const { data } = await api.post('/upload-resume', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: (e) => {
+      if (onProgress && e.total) {
+        onProgress(Math.round((e.loaded * 100) / e.total))
+      }
+    },
+  })
+  return data
+}
+
+export async function analyzeResume(payload) {
+  const { data } = await api.post('/analyze-resume', payload)
+  return data
+}
+
+export async function getWorkflowStatus() {
+  const { data } = await api.get('/workflow-status')
+  return data
+}
+
+export async function getApplicationTracker() {
+  const { data } = await api.get('/application-tracker')
+  return data
+}
+
 export async function uploadPdf(file, onProgress) {
   const form = new FormData()
   form.append('file', file)
@@ -46,6 +80,7 @@ export async function getMemory() {
   const { data } = await api.get('/memory')
   return data
 }
+
 
 export async function getPendingChanges() {
   const { data } = await api.get('/pending-changes')

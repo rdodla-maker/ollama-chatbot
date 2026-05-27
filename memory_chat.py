@@ -1,4 +1,4 @@
-import requests
+import httpx
 import json
 import os
 
@@ -40,12 +40,8 @@ while True:
         "stream": False
     }
 
-    response = requests.post(
-        OLLAMA_URL,
-        json=payload
-    )
-
-    result = response.json()["response"]
+    response = httpx.post(OLLAMA_URL, json=payload, timeout=30.0)
+    result = response.json().get("response", "")
 
     print("\nAI:", result)
     print()

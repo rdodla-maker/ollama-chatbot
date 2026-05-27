@@ -110,14 +110,14 @@ POST /agent
 
 | Variable | Description |
 |----------|-------------|
-| `OLLAMA_BASE_URL` | Ollama server URL |
-| `OLLAMA_MODEL` | Model name (e.g. `llama3`) |
+| `OLLAMA_URL` | Ollama server URL |
+| `MODEL_NAME` | Model name (e.g. `llama3`) |
 | `ALLOWED_FS_ROOT` | Sandbox for file/folder tools |
 | `CHROMA_PATH` | ChromaDB storage directory |
 | `UPLOAD_DIR` | PDF upload directory |
 | `CORS_ORIGINS` | Comma-separated allowed origins |
-| `MAX_UPLOAD_MB` | Max PDF upload size |
-| `MAX_FILE_READ_BYTES` | Max bytes for file reader tool |
+| `MAX_UPLOAD_MB` | Max PDF upload size (MB) |
+| `MAX_FILE_SIZE` | Max bytes for file reader tool |
 
 ## Security (Wave 1)
 

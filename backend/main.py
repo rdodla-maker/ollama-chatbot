@@ -10,6 +10,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+import time
 
 from api.pending_routes import router as pending_router
 from api.routes import router
@@ -32,6 +34,30 @@ app = FastAPI(
     description="Ollama + RAG + Autonomous Agent API",
     version="3.0.0",
 )
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time.time()
+        try:
+            response = await call_next(request)
+            status = response.status_code
+        except Exception as exc:  # ensure we log unexpected exceptions
+            status = 500
+            raise
+        finally:
+            duration = (time.time() - start) * 1000
+            logger.info(
+                "%s %s %s %.2fms",
+                request.method,
+                request.url.path,
+                status,
+                duration,
+            )
+        return response
+
+
+app.add_middleware(RequestLoggingMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -72,3 +98,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 async def on_startup():
     logger.info("Backend started — Ollama model: %s", settings.ollama_model)
     logger.info("Allowed filesystem root: %s", settings.allowed_fs_root)
+    # Initialize SQLite database and background worker scaffolding
+    try:
+        from db import init_db
+        from services.task_queue import start_worker_in_background
+
+        init_db()
+        start_worker_in_background()
+        logger.info("Database initialized and background worker started")
+    except Exception:
+        logger.exception("Failed to initialize DB or background worker")

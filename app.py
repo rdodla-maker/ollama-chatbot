@@ -1,4 +1,4 @@
-import requests
+import httpx
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
@@ -18,12 +18,8 @@ while True:
         "stream": False
     }
 
-    response = requests.post(
-        OLLAMA_URL,
-        json=payload
-    )
-
-    result = response.json()["response"]
+    response = httpx.post(OLLAMA_URL, json=payload, timeout=30.0)
+    result = response.json().get("response", "")
 
     print("\nAI:", result)
     print()
