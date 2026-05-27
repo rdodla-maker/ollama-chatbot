@@ -1,11 +1,11 @@
-import asyncio
-from db.connection import database
+"""
+Legacy test script for MongoDB connection. No longer applicable—kept
+for historical reference. The project now uses SQLite via SQLAlchemy.
+"""
 
-async def test_connection():
+def main():
+    print("Legacy MongoDB connection test removed. Use SQLite for local dev.")
 
-    collections = await database.list_collection_names()
 
-    print("MongoDB Connected ✅")
-    print(collections)
-
-asyncio.run(test_connection())
+if __name__ == '__main__':
+    main()

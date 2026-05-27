@@ -115,11 +115,70 @@ class ProfileItem(BaseModel):
     id: str
     uploaded_filename: str
     created_at: str
+    updated_at: str | None = None
     status: str
     target_roles: list[str] = Field(default_factory=list)
     profile: dict | None = None
     ats_score: float | None = None
+    progress_percentage: int | float = 0
+    current_stage: str = "queued"
+    current_stage_label: str = "Workflow queued"
+    current_stage_state: str = "queued"
+    workflow_duration_seconds: float | None = None
+    last_activity: str | None = None
+    queued_actions: list[str] = Field(default_factory=list)
+    execution_metadata: dict = Field(default_factory=dict)
+    execution_summary: str = ""
+    timeline: list[dict] = Field(default_factory=list)
+    available_actions: list[dict] = Field(default_factory=list)
+    stage_actions: list[dict] = Field(default_factory=list)
+    retry_count: int = 0
+    retry_history: list[dict] = Field(default_factory=list)
+    failure_reason: str | None = None
+
+
+class WorkflowActivityItem(BaseModel):
+    workflow_id: str
+    filename: str
+    timestamp: str | None = None
+    status: str
+    stage: str
+    label: str
+    state: str
+    source: str = "workflow-engine"
+    event_type: str = "workflow.event"
+
+
+class WorkflowOverview(BaseModel):
+    active: int = 0
+    completed: int = 0
+    failed: int = 0
+    queued: int = 0
+    total: int = 0
+
+
+class QueueSnapshot(BaseModel):
+    size: int = 0
+    pending: list[dict] = Field(default_factory=list)
 
 
 class WorkflowStatusResponse(BaseModel):
     profiles: list[ProfileItem] = Field(default_factory=list)
+    activity_feed: list[WorkflowActivityItem] = Field(default_factory=list)
+    overview: WorkflowOverview = Field(default_factory=WorkflowOverview)
+    queue: QueueSnapshot = Field(default_factory=QueueSnapshot)
+    automation_placeholders: dict = Field(default_factory=dict)
+    transport: dict = Field(default_factory=dict)
+
+
+class WorkflowActionRequest(BaseModel):
+    action: str = Field(..., min_length=3, max_length=20)
+    stage: str | None = None
+
+
+class WorkflowActionResponse(BaseModel):
+    workflow_id: str
+    action: str
+    status: str
+    message: str
+    stage: str | None = None

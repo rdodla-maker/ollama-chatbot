@@ -1,1 +1,0 @@
-﻿{"path":"src/App.jsx","content":"ï»¿import ChatPage from './pages/ChatPage'\n\nexport default function App() {\n\t// Minimal app shell â renders the main Chat page.\n\t// Expand routing/layout later as needed.\n\treturn (\n\t\t<div className=\"app-container\">\n\t\t\t<ChatPage status={{ online: true, label: 'Local' }} />\n\t\t</div>\n\t)\n}\n\n"}

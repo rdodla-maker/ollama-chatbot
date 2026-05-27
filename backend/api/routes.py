@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
@@ -28,6 +28,8 @@ from models.schemas import (
     AnalyzeResumeRequest,
     AnalyzeResumeResponse,
     WorkflowStatusResponse,
+    WorkflowActionRequest,
+    WorkflowActionResponse,
 )
 from rag.codebase_index import index_codebase
 from rag.vector_store import ingest_pdf, search_chunks_with_metadata
@@ -40,6 +42,9 @@ from services.application_tracking_service import (
 from services.google_sheets_service import append_application_to_sheet
 from services.resume_parsing_service import extract_text_from_resume
 from services.profile_store import create_profile, update_profile, list_profiles
+from services.workflow_status_service import build_workflow_status_payload
+from services.workflow_orchestration_service import apply_workflow_action
+from services.workflow_event_bus import build_snapshot_event, subscribe, unsubscribe
 import uuid
 from pathlib import Path
 import json
@@ -47,6 +52,10 @@ import json
 logger = get_logger("api")
 
 router = APIRouter()
+
+
+def _sse_data(payload: dict) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
 
 
 def _safe_filename(name: str) -> str:
@@ -165,7 +174,7 @@ async def upload_resume(file: UploadFile = File(...)):
         try:
             from services.task_queue import enqueue_task
 
-            enqueue_task({"type": "analyze_resume", "upload_id": file_path.name})
+            enqueue_task({"type": "analyze_resume", "upload_id": file_path.name, "workflow_id": profile.get("id")})
         except Exception:
             logger.debug("Task queue not available; skipping enqueue")
 
@@ -201,79 +210,79 @@ async def analyze_resume(body: AnalyzeResumeRequest):
     else:
         raise HTTPException(status_code=400, detail="No resume text or upload_id provided.")
 
-    prompt = (
-        "You are an expert recruiter and resume analyst. Given a candidate resume and target roles, produce a single valid JSON object with the following keys:\n"
-        "- skills: list of candidate skills (strings)\n"
-        "- projects: list of short project summaries (strings)\n"
-        "- education: list of education entries (strings)\n"
-        "- certifications: list of certifications (strings)\n"
-        "- experience: list of experience summaries (strings)\n"
-        "- strengths: list of strengths (strings)\n"
-        "- missing_skills: list of skills this candidate should acquire for the target roles\n"
-        "- role_compatibility: mapping of role -> score (0-100) and explanation\n"
-        "- ats_score: numeric 0-100 overall resume ATS compatibility\n"
-        "- recommendations: list of prioritized improvement suggestions (strings)\n"
-        "Output ONLY valid JSON and nothing else.\n\n"
-        f"TARGET_ROLES: {roles}\n\nRESUME:\n{resume_text[:12000]}\n\n"
-    )
-
+    # Use shared analysis service to analyze and persist results
     try:
-        ai_response = await generate_completion(prompt)
+        from services.analysis_service import analyze_and_persist
+
+        analysis = await analyze_and_persist(upload_id, resume_text, roles)
     except Exception as exc:
+        logger.exception("Analysis service failed")
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    parsed = None
+    parsed = analysis.get("parsed")
     ats_score = None
     role_compat = None
-    try:
-        parsed = json.loads(ai_response)
-        ats_score = parsed.get("ats_score") if isinstance(parsed, dict) else None
-        role_compat = parsed.get("role_compatibility") if isinstance(parsed, dict) else None
-    except Exception:
-        parsed = None
+    if isinstance(parsed, dict):
+        ats_score = parsed.get("ats_score")
+        role_compat = parsed.get("role_compatibility")
 
-    profile_obj = {
-        "analysis_raw": ai_response,
-        "parsed": parsed,
-        "target_roles": roles,
-        "ats_score": ats_score,
-        "status": "analyzed",
-    }
-
+    # find profile id if available
     profile_id = None
     if upload_id:
-        # try to find profile and update it
         try:
-            # repository-backed list_profiles will return structured dicts
             records = await asyncio.to_thread(list_profiles)
             for r in records:
                 if r.get("uploaded_filename") == upload_id:
-                    await asyncio.to_thread(update_profile, r.get("id"), profile_obj)
                     profile_id = r.get("id")
                     break
         except Exception:
-            logger.exception("Failed updating profile in store")
+            logger.debug("Could not locate profile id after analysis")
 
-    return AnalyzeResumeResponse(upload_id=upload_id, profile_id=profile_id, analysis_raw=ai_response, parsed=parsed, ats_score=ats_score, role_compatibility=role_compat)
+    return AnalyzeResumeResponse(upload_id=upload_id, profile_id=profile_id, analysis_raw=analysis.get("analysis_raw"), parsed=parsed, ats_score=ats_score, role_compatibility=role_compat)
 
 
 
 @router.get("/workflow-status", response_model=WorkflowStatusResponse)
 async def workflow_status():
     records = await asyncio.to_thread(list_profiles)
-    items = []
-    for r in records:
-        items.append(
-            {
-                "id": r.get("id"),
-                "uploaded_filename": r.get("uploaded_filename"),
-                "created_at": r.get("created_at"),
-                "status": r.get("status"),
-                "target_roles": r.get("target_roles") or [],
-                "profile": r.get("profile"),
-            }
-        )
-    return WorkflowStatusResponse(profiles=items)
+    try:
+        from services.task_queue import get_queue_snapshot
+
+        queue_snapshot = get_queue_snapshot()
+    except Exception:
+        queue_snapshot = {"size": 0, "pending": []}
+    payload = build_workflow_status_payload(records, queue_snapshot)
+    return WorkflowStatusResponse(**payload)
+
+
+@router.get("/workflow-status/stream")
+async def workflow_status_stream(request: Request):
+    subscriber_id, event_queue = subscribe()
+
+    async def event_stream():
+        try:
+            yield _sse_data(build_snapshot_event())
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    envelope = await asyncio.wait_for(asyncio.to_thread(event_queue.get, True, 10), timeout=12)
+                    yield _sse_data(envelope)
+                except asyncio.TimeoutError:
+                    yield _sse_data({"type": "heartbeat", "timestamp": asyncio.get_running_loop().time()})
+        finally:
+            unsubscribe(subscriber_id)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/workflow-status/{workflow_id}/action", response_model=WorkflowActionResponse)
+async def workflow_action(workflow_id: str, body: WorkflowActionRequest):
+    try:
+        result = await asyncio.to_thread(apply_workflow_action, workflow_id, body.action, body.stage)
+        return WorkflowActionResponse(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/index-codebase", response_model=CodebaseIndexResponse)

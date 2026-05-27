@@ -178,6 +178,352 @@ a { color: inherit; }
 .recent-item strong { display: block; }
 .recent-item span { color: var(--muted); font-size: 13px; }
 
+.mission-control-panel {
+	padding: 28px;
+	margin-bottom: 22px;
+}
+
+.mission-control-stack {
+	display: grid;
+	gap: 22px;
+}
+
+.mission-control-header {
+	display: flex;
+	justify-content: space-between;
+	gap: 18px;
+	align-items: start;
+}
+
+.mission-control-header h3,
+.mission-detail-card h4,
+.workflow-card h4 {
+	margin: 6px 0 0;
+	font-size: 22px;
+	letter-spacing: -0.03em;
+}
+
+.mission-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+	gap: 20px;
+	align-items: start;
+}
+
+.workflow-card-grid,
+.mission-detail-stack,
+.mission-feed,
+.automation-grid {
+	display: grid;
+	gap: 14px;
+}
+
+.workflow-card {
+	appearance: none;
+	width: 100%;
+	padding: 18px;
+	text-align: left;
+	border-radius: 20px;
+	border: 1px solid rgba(255,255,255,0.08);
+	background: linear-gradient(180deg, rgba(14, 21, 36, 0.8), rgba(11, 18, 30, 0.92));
+	color: var(--text);
+	cursor: pointer;
+	box-shadow: var(--shadow-soft);
+	transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.workflow-card:hover,
+.workflow-card.selected {
+	transform: translateY(-2px);
+	border-color: rgba(96, 165, 250, 0.34);
+	background: linear-gradient(180deg, rgba(17, 26, 43, 0.92), rgba(10, 18, 34, 0.96));
+}
+
+.workflow-card.state-retrying,
+.workflow-card.state-processing,
+.workflow-card.state-running {
+	box-shadow: var(--shadow-soft), 0 0 0 1px rgba(103, 232, 249, 0.16), 0 0 24px rgba(103, 232, 249, 0.12);
+}
+
+.workflow-card.state-cancelled {
+	border-color: rgba(248, 113, 113, 0.24);
+	background: linear-gradient(180deg, rgba(36, 18, 24, 0.88), rgba(20, 12, 18, 0.92));
+}
+
+.workflow-card-head,
+.timeline-head,
+.mission-feed-item,
+.workflow-card-footer,
+.mission-summary-grid,
+.timeline-meta {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	align-items: center;
+}
+
+.workflow-card-file,
+.workflow-last-activity,
+.workflow-stat-label,
+.mission-feed-copy span,
+.mission-feed-meta,
+.timeline-meta {
+	color: var(--muted);
+	font-size: 13px;
+}
+
+.workflow-progress-bar {
+	height: 8px;
+	border-radius: 999px;
+	background: rgba(255,255,255,0.06);
+	overflow: hidden;
+	margin: 16px 0;
+	position: relative;
+}
+
+.workflow-progress-bar span {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	background: linear-gradient(90deg, var(--accent-strong), var(--accent-cyan));
+	box-shadow: 0 0 16px rgba(103, 232, 249, 0.34);
+}
+
+.workflow-card-stats,
+.mission-summary-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 12px;
+}
+
+.mission-summary-grid {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	margin-top: 8px;
+}
+
+.workflow-card-stats strong,
+.mission-summary-grid strong {
+	display: block;
+	font-size: 18px;
+	margin-top: 4px;
+}
+
+.mission-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 8px 12px;
+	border-radius: 999px;
+	font-size: 12px;
+	text-transform: capitalize;
+	border: 1px solid rgba(255,255,255,0.08);
+	background: rgba(255,255,255,0.04);
+}
+
+.mission-badge.tone-completed {
+	color: #bdf7de;
+	background: rgba(16, 185, 129, 0.14);
+	border-color: rgba(16, 185, 129, 0.24);
+}
+
+.mission-badge.tone-running {
+	color: #d6f7ff;
+	background: rgba(14, 165, 233, 0.14);
+	border-color: rgba(14, 165, 233, 0.24);
+}
+
+.mission-badge.tone-queued {
+	color: #efe8ff;
+	background: rgba(167, 139, 250, 0.14);
+	border-color: rgba(167, 139, 250, 0.24);
+}
+
+.mission-badge.tone-failed {
+	color: #ffd8d8;
+	background: rgba(248, 113, 113, 0.14);
+	border-color: rgba(248, 113, 113, 0.24);
+}
+
+.mission-badge.tone-processing,
+.mission-badge.tone-retrying {
+	color: #d6f7ff;
+	background: rgba(14, 165, 233, 0.14);
+	border-color: rgba(14, 165, 233, 0.24);
+}
+
+.mission-badge.tone-cancelled {
+	color: #ffd8d8;
+	background: rgba(248, 113, 113, 0.12);
+	border-color: rgba(248, 113, 113, 0.18);
+}
+
+.workflow-action-row {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-top: 16px;
+}
+
+.workflow-action-row.compact {
+	margin-top: 10px;
+}
+
+.workflow-action-btn {
+	background: rgba(255,255,255,0.04);
+	border: 1px solid rgba(255,255,255,0.08);
+	border-radius: 12px;
+	padding: 9px 12px;
+	color: var(--text);
+	font: inherit;
+	cursor: pointer;
+	transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.workflow-action-btn:hover:not(:disabled) {
+	background: rgba(96, 165, 250, 0.1);
+	border-color: rgba(96, 165, 250, 0.24);
+	transform: translateY(-1px);
+}
+
+.workflow-action-btn.danger:hover:not(:disabled) {
+	background: rgba(248, 113, 113, 0.12);
+	border-color: rgba(248, 113, 113, 0.24);
+}
+
+.workflow-action-btn:disabled,
+.workflow-action-btn.disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.mission-detail-card {
+	padding: 18px;
+	border-radius: 20px;
+}
+
+.stage-action-group {
+	margin-top: 18px;
+	padding-top: 16px;
+	border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.panel-card-header.compact {
+	margin-bottom: 14px;
+}
+
+.workflow-timeline {
+	display: grid;
+	gap: 14px;
+}
+
+.timeline-item {
+	display: grid;
+	grid-template-columns: 22px 1fr;
+	gap: 12px;
+	align-items: start;
+}
+
+.timeline-rail {
+	display: grid;
+	justify-items: center;
+	gap: 6px;
+	min-height: 48px;
+}
+
+.timeline-dot,
+.activity-dot.state-completed,
+.activity-dot.state-running,
+.activity-dot.state-queued,
+.activity-dot.state-failed {
+	width: 10px;
+	height: 10px;
+	border-radius: 999px;
+}
+
+.timeline-dot.state-completed,
+.activity-dot.state-completed { background: var(--success); box-shadow: 0 0 16px rgba(52, 211, 153, 0.8); }
+.timeline-dot.state-running,
+.activity-dot.state-running { background: var(--accent-cyan); box-shadow: 0 0 16px rgba(103, 232, 249, 0.8); }
+.timeline-dot.state-queued,
+.activity-dot.state-queued { background: var(--accent-purple); box-shadow: 0 0 16px rgba(167, 139, 250, 0.8); }
+.timeline-dot.state-failed,
+.activity-dot.state-failed { background: var(--danger); box-shadow: 0 0 16px rgba(248, 113, 113, 0.8); }
+.timeline-dot.state-processing,
+.activity-dot.state-processing,
+.activity-dot.state-retrying { background: var(--accent-strong); box-shadow: 0 0 16px rgba(96, 165, 250, 0.8); }
+.timeline-dot.state-cancelled,
+.activity-dot.state-cancelled { background: #fca5a5; box-shadow: 0 0 16px rgba(252, 165, 165, 0.75); }
+
+.timeline-line {
+	width: 1px;
+	flex: 1;
+	min-height: 42px;
+	background: linear-gradient(180deg, rgba(96, 165, 250, 0.5), rgba(255,255,255,0.08));
+}
+
+.timeline-content strong,
+.mission-feed-copy strong,
+.automation-card strong {
+	display: block;
+	font-size: 14px;
+}
+
+.timeline-log {
+	margin-top: 6px;
+	color: var(--muted);
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.mission-feed-item {
+	padding: 14px 0;
+	border-bottom: 1px solid rgba(255,255,255,0.06);
+	align-items: center;
+}
+
+.mission-feed-item:last-child {
+	border-bottom: none;
+	padding-bottom: 0;
+}
+
+.mission-feed-copy {
+	min-width: 0;
+	flex: 1;
+}
+
+.mission-feed-meta {
+	display: grid;
+	gap: 6px;
+	justify-items: end;
+}
+
+.automation-grid {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.automation-card {
+	padding: 16px;
+	border-radius: 18px;
+	background: rgba(255,255,255,0.03);
+	border: 1px solid rgba(255,255,255,0.06);
+}
+
+.automation-card p {
+	margin: 8px 0 0;
+	color: var(--muted);
+	font-size: 13px;
+	line-height: 1.55;
+}
+
+.automation-card-highlight {
+	background: linear-gradient(180deg, rgba(96, 165, 250, 0.08), rgba(103, 232, 249, 0.06));
+	border-color: rgba(96, 165, 250, 0.18);
+}
+
+.mission-bottom-grid {
+	margin-top: 6px;
+}
+
 /* Topbar */
 .topbar {
 	display: flex;
@@ -534,10 +880,43 @@ a { color: inherit; }
 }
 
 @media (max-width: 980px) {
+	.mission-grid,
+	.two-column,
+	.hero-grid,
+	.stats-grid,
+	.automation-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.workflow-card-stats,
+	.mission-summary-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+
+@media (max-width: 720px) {
+	.mission-control-header,
+	.workflow-card-head,
+	.workflow-card-footer,
+	.timeline-head,
+	.timeline-meta,
+	.mission-feed-item {
+		flex-direction: column;
+		align-items: start;
+	}
+
+	.workflow-card-stats,
+	.mission-summary-grid,
+	.automation-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+@media (max-width: 1080px) {
 	.dashboard-shell { grid-template-columns: 1fr; }
 	.sidebar { position: relative; height: auto; border-right: none; border-bottom: 1px solid var(--surface-border); }
 	.two-column,
-	.stats-grid,
+	.form-grid { grid-template-columns: 1fr; }
 	.hero-grid { grid-template-columns: 1fr; }
 	.dashboard-main { padding: 16px; }
 	.page { padding: 12px; }

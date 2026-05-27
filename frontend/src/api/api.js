@@ -52,6 +52,30 @@ export async function getWorkflowStatus() {
   return data
 }
 
+export function streamWorkflowStatus(handlers) {
+  const source = new EventSource(`${API_BASE}/workflow-status/stream`)
+
+  source.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data)
+      handlers.onEnvelope?.(payload)
+    } catch {
+      /* ignore malformed events */
+    }
+  }
+
+  source.onerror = () => {
+    handlers.onError?.('Workflow stream disconnected.')
+  }
+
+  return () => source.close()
+}
+
+export async function performWorkflowAction(workflowId, action, stage) {
+  const { data } = await api.post(`/workflow-status/${workflowId}/action`, { action, stage })
+  return data
+}
+
 export async function getApplicationTracker() {
   const { data } = await api.get('/application-tracker')
   return data

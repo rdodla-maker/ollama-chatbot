@@ -6,15 +6,47 @@ import json
 
 
 def create_profile_db(db: Session, uploaded_filename: str, parsed_text: str, target_roles: List[str]) -> ResumeProfile:
+    workflow_history = json.dumps(
+        [
+            {
+                "when": datetime.utcnow().isoformat(),
+                "status": "uploaded",
+                "metadata": {
+                    "stage": "resume_uploaded",
+                    "label": "Resume uploaded",
+                    "progress": 10,
+                    "state": "completed",
+                    "source": "workflow-engine",
+                    "event_type": "workflow.created",
+                },
+            }
+        ]
+    )
     rp = ResumeProfile(
         uploaded_filename=uploaded_filename,
         parsed_text=(parsed_text or "")[:20000],
         target_roles=json.dumps(target_roles or []),
         status="uploaded",
+        workflow_history=workflow_history,
     )
     db.add(rp)
     db.commit()
     db.refresh(rp)
+    try:
+        from services.workflow_event_bus import publish_event
+
+        publish_event(
+            "workflow.created",
+            workflow_id=rp.id,
+            source="workflow-engine",
+            event={
+                "workflow_id": rp.id,
+                "uploaded_filename": rp.uploaded_filename,
+                "stage": "resume_uploaded",
+            },
+        )
+    except Exception:
+        pass
     return rp
 
 
@@ -38,11 +70,37 @@ def update_profile_db(db: Session, profile_id: str, profile_obj: dict) -> Option
         hist = json.loads(history)
     except Exception:
         hist = []
-    hist.append({"when": datetime.utcnow().isoformat(), "status": rp.status})
+    hist.append(
+        {
+            "when": datetime.utcnow().isoformat(),
+            "status": rp.status,
+            "metadata": profile_obj.get("metadata") or {},
+        }
+    )
     rp.workflow_history = json.dumps(hist)
     db.add(rp)
     db.commit()
     db.refresh(rp)
+    try:
+        from services.workflow_event_bus import publish_event
+
+        current = hist[-1] if hist else {"status": rp.status, "metadata": profile_obj.get("metadata") or {}}
+        metadata = current.get("metadata") or {}
+        publish_event(
+            metadata.get("event_type") or rp.status,
+            workflow_id=rp.id,
+            source=metadata.get("source") or "workflow-engine",
+            event={
+                "workflow_id": rp.id,
+                "uploaded_filename": rp.uploaded_filename,
+                "status": current.get("status"),
+                "stage": metadata.get("stage"),
+                "metadata": metadata,
+                "timestamp": current.get("when"),
+            },
+        )
+    except Exception:
+        pass
     return rp
 
 
@@ -58,15 +116,22 @@ def list_profiles_db(db: Session) -> List[dict]:
             parsed = json.loads(r.analysis_json) if r.analysis_json else None
         except Exception:
             parsed = None
+        try:
+            workflow_history = json.loads(r.workflow_history) if r.workflow_history else []
+        except Exception:
+            workflow_history = []
         out.append(
             {
                 "id": r.id,
                 "uploaded_filename": r.uploaded_filename,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
                 "status": r.status,
                 "target_roles": target_roles,
                 "profile": parsed,
                 "ats_score": r.ats_score,
+                "workflow_history": workflow_history,
+                "analysis_raw": r.analysis_raw,
             }
         )
     return out

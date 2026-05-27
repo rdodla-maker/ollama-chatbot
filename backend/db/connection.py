@@ -1,17 +1,18 @@
-from motor.motor_asyncio import AsyncIOMotorClient
-from dotenv import load_dotenv
-import os
+"""
+Legacy MongoDB connection module (motor AsyncIOMotorClient).
 
-load_dotenv()
+This project now uses SQLite + SQLAlchemy by default. The original MongoDB
+connection file has been retained as a placeholder for future optional
+integration, but it is no longer used by the application. To re-enable,
+restore the original content and set `MONGODB_URL`/`DATABASE_NAME` in your environment.
 
-MONGODB_URL = os.getenv("MONGODB_URL")
-DATABASE_NAME = os.getenv("DATABASE_NAME")
+NOTE: Keeping a lightweight placeholder avoids accidental imports during
+cleanup while preserving context for future migrations.
+"""
 
-client = AsyncIOMotorClient(MONGODB_URL)
-
-database = client[DATABASE_NAME]
+from typing import Any
 
 
-def get_database():
-
-    return database
+def get_database() -> Any:
+    """Return a benign placeholder for legacy imports."""
+    return None

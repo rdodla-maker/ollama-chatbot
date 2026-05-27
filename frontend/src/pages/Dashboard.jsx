@@ -1,30 +1,33 @@
 import Topbar from '../components/Topbar'
 import StatCard from '../components/StatCard'
+import WorkflowMissionControl from '../components/WorkflowMissionControl'
+import { useWorkflowStatus } from '../hooks/useWorkflowStatus'
 
-export default function Dashboard({ status, latestResult, trackerItems = [], onNavigate }) {
-  const pendingCount = trackerItems.filter((item) => item.status === 'pending').length
+export default function Dashboard({ status, trackerItems = [], onNavigate }) {
   const recentItems = trackerItems.slice(0, 3)
+  const { data, loading, refreshing, error, lastUpdated, refreshNow } = useWorkflowStatus({ pollMs: 10000, transport: 'sse' })
+  const overview = data.overview || { active: 0, completed: 0, failed: 0, queued: 0 }
 
   return (
     <div className="page page-wide">
       <Topbar
-        title="Dashboard"
-        subtitle="Generate tailored application materials and track them in one place."
+        title="AI Mission Control"
+        subtitle="Monitor live resume intelligence workflows, AI activity, and automation readiness from one control surface."
         status={status}
       />
 
       <section className="hero-card">
         <div className="hero-grid">
           <div>
-            <p className="eyebrow">AI Job Application Assistant</p>
-            <h2>Build a standout application pack with startup-grade polish.</h2>
+            <p className="eyebrow">AI Career Copilot</p>
+            <h2>Operate live resume intelligence workflows like a compact mission control system.</h2>
             <p>
-              Turn one job brief into a tailored outreach email, polished cover letter,
-              and resume improvement plan in a single workflow.
+              Watch each workflow move from upload through parsing, scoring, and optimization readiness,
+              with live SSE delivery now and multi-transport orchestration ready next.
             </p>
             <div className="hero-actions">
               <button type="button" className="btn-primary" onClick={() => onNavigate?.('start-apply')}>
-                Start Apply
+                Launch Workflow
               </button>
               <button type="button" className="btn-ghost" onClick={() => onNavigate?.('tracker')}>
                 Open Tracker
@@ -41,22 +44,22 @@ export default function Dashboard({ status, latestResult, trackerItems = [], onN
               <div className="activity-item">
                 <span className="activity-dot glow-cyan" />
                 <div>
-                  <strong>Email drafting</strong>
-                  <span>Role-aware outreach copy generated in seconds.</span>
+                  <strong>Live workflow states</strong>
+                  <span>Queued, active, failed, and completed runs surface automatically.</span>
                 </div>
               </div>
               <div className="activity-item">
                 <span className="activity-dot glow-purple" />
                 <div>
-                  <strong>Cover letter tuning</strong>
-                  <span>Structured for clarity, tone, and fit.</span>
+                  <strong>Execution telemetry</strong>
+                  <span>Progress, duration, ATS score, and last activity stay visible.</span>
                 </div>
               </div>
               <div className="activity-item">
                 <span className="activity-dot glow-blue" />
                 <div>
-                  <strong>Resume suggestions</strong>
-                  <span>Targeted improvement ideas based on the job brief.</span>
+                  <strong>Automation ready</strong>
+                  <span>Prepared for future websockets, queues, and n8n monitoring.</span>
                 </div>
               </div>
             </div>
@@ -65,39 +68,21 @@ export default function Dashboard({ status, latestResult, trackerItems = [], onN
       </section>
 
       <section className="stats-grid">
-        <StatCard label="Tracked applications" value={trackerItems.length} detail="Stored locally and ready for Google Sheets sync." tone="cyan" />
-        <StatCard label="Pending" value={pendingCount} detail="Generated but not yet moved to interview stage." tone="purple" />
-        <StatCard label="Latest email" value={latestResult ? 'Ready' : 'Not generated'} detail="Your newest outreach draft." tone="blue" />
+        <StatCard label="Active workflows" value={overview.active} detail="Currently executing AI workflow stages." tone="cyan" />
+        <StatCard label="Completed" value={overview.completed} detail="Optimization-ready workflows." tone="purple" />
+        <StatCard label="Queued" value={overview.queued} detail="Waiting on the in-memory workflow engine." tone="blue" />
+        <StatCard label="Failed" value={overview.failed} detail="Runs needing manual attention or retry." tone="danger" />
       </section>
 
-      <section className="panel-grid two-column">
-        <div className="panel-card">
-          <div className="panel-card-header">
-            <div>
-              <span className="section-kicker">Workflow</span>
-              <h3>What this MVP does</h3>
-            </div>
-          </div>
-          <ul className="feature-list">
-            <li>Collects job and resume details from a single form.</li>
-            <li>Uses Ollama to generate an email, cover letter, and resume suggestions.</li>
-            <li>Stores application records for the tracker and Google Sheets sync.</li>
-          </ul>
-        </div>
-
-        <div className="panel-card">
-          <div className="panel-card-header">
-            <div>
-              <span className="section-kicker">Preview</span>
-              <h3>Latest output</h3>
-            </div>
-          </div>
-          <p className="muted-block">
-            {latestResult?.generated_cover_letter
-              ? latestResult.generated_cover_letter.slice(0, 280) + '...'
-              : 'Generate your first application pack to preview outputs here.'}
-          </p>
-        </div>
+      <section className="panel-card mission-control-panel">
+        <WorkflowMissionControl
+          data={data}
+          loading={loading}
+          refreshing={refreshing}
+          error={error}
+          lastUpdated={lastUpdated}
+          onRefresh={refreshNow}
+        />
       </section>
 
       <section className="panel-grid two-column dashboard-bottom-grid">
@@ -111,7 +96,7 @@ export default function Dashboard({ status, latestResult, trackerItems = [], onN
           <div className="quick-actions-grid">
             <button type="button" className="quick-action-card" onClick={() => onNavigate?.('start-apply')}>
               <strong>Start Apply</strong>
-              <span>Begin a multi-step resume & role workflow.</span>
+              <span>Begin a multi-step resume and target-role workflow.</span>
             </button>
             <button type="button" className="quick-action-card" onClick={() => onNavigate?.('resume')}>
               <strong>Review resume</strong>
@@ -124,7 +109,7 @@ export default function Dashboard({ status, latestResult, trackerItems = [], onN
           <div className="panel-card-header">
             <div>
               <span className="section-kicker">Recent applications</span>
-              <h3>Latest activity</h3>
+              <h3>Latest application records</h3>
             </div>
           </div>
           {recentItems.length === 0 ? (
