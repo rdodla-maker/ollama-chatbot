@@ -5,6 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from services.integration_seams import build_integration_seams_payload
+from services.workflow_contracts import build_contract_manifest, normalize_event_metadata
+
 
 DEFAULT_STAGE_LABELS = {
     "resume_uploaded": "Resume uploaded",
@@ -63,6 +66,16 @@ def _coerce_event(event: dict[str, Any]) -> dict[str, Any]:
     if progress is None:
         progress = mapping.get("progress", 0)
     state = metadata.get("state") or mapping.get("state") or "completed"
+    normalized_metadata = normalize_event_metadata(
+        metadata,
+        event_type=metadata.get("event_type") or event.get("status"),
+        stage=stage,
+        status=event.get("status") or stage,
+        source=metadata.get("source"),
+        owner=metadata.get("owner"),
+        severity=metadata.get("severity"),
+        lifecycle=metadata.get("lifecycle") or "event",
+    )
     return {
         "timestamp": event.get("when"),
         "status": event.get("status") or stage,
@@ -71,7 +84,11 @@ def _coerce_event(event: dict[str, Any]) -> dict[str, Any]:
         "progress": progress,
         "state": state,
         "duration_seconds": event.get("duration_seconds"),
-        "metadata": metadata,
+        "metadata": {
+            **normalized_metadata,
+            "previous_stage": normalized_metadata.get("previous_stage"),
+            "last_event": normalized_metadata.get("last_event") or normalized_metadata.get("event_type") or event.get("status"),
+        },
     }
 
 
@@ -129,6 +146,8 @@ def build_workflow_profile(record: dict[str, Any]) -> dict[str, Any]:
     retry_count = _retry_count(record)
     retry_history = _retry_history(record)
     failure_reason = _last_failure_reason(record)
+    worker_owner = current_event.get("metadata", {}).get("worker_owner")
+    recovery_actions = [item for item in get_available_actions(record) if item.get("action") in {"retry", "restart", "resume", "pause", "cancel"}]
 
     analysis = record.get("profile") or {}
     execution_metadata = {
@@ -139,9 +158,25 @@ def build_workflow_profile(record: dict[str, Any]) -> dict[str, Any]:
         "role_count": len(record.get("target_roles") or []),
         "ats_score": record.get("ats_score") or analysis.get("ats_score"),
         "last_state": current_event.get("state"),
+        "current_stage": current_event.get("stage"),
+        "previous_stage": current_event.get("metadata", {}).get("previous_stage"),
+        "stage_owner": current_event.get("metadata", {}).get("owner", "workflow-engine"),
+        "worker_owner": worker_owner,
+        "severity": current_event.get("metadata", {}).get("severity", "info"),
         "retry_count": retry_count,
         "failure_reason": failure_reason,
+        "last_event": current_event.get("metadata", {}).get("last_event") or current_event.get("metadata", {}).get("event_type") or current_event.get("status"),
+        "recovery_mode": current_event.get("metadata", {}).get("recovery_mode"),
         "recovery_state": "recoverable" if current_event.get("state") in {"failed", "cancelled"} and retry_count < 3 else "stable",
+        "stage_durations": [
+            {
+                "stage": event.get("stage"),
+                "duration_seconds": event.get("duration_seconds"),
+                "worker_owner": event.get("metadata", {}).get("worker_owner"),
+            }
+            for event in timeline
+        ],
+        "recovery_actions": recovery_actions,
     }
     summary_bits = [current_event.get("label")]
     if execution_metadata["ats_score"] is not None:
@@ -173,11 +208,24 @@ def build_workflow_profile(record: dict[str, Any]) -> dict[str, Any]:
         "retry_count": retry_count,
         "retry_history": retry_history,
         "failure_reason": failure_reason,
+        "candidate_profile": record.get("candidate_profile") or {},
+        "candidate_memory": record.get("candidate_memory") or [],
+        "resume_versions": record.get("resume_versions") or [],
+        "failure_diagnostics": record.get("failure_diagnostics") or {},
     }
 
 
-def build_workflow_status_payload(records: list[dict[str, Any]], queue_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_workflow_status_payload(
+    records: list[dict[str, Any]],
+    queue_snapshot: dict[str, Any] | None = None,
+    analytics: dict[str, Any] | None = None,
+    observability: dict[str, Any] | None = None,
+    event_query: dict[str, Any] | None = None,
+    active_filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     from services.workflow_orchestration_service import build_transport_capabilities
+    from services.observability_service import build_observability_snapshot
+    from services.workflow_analytics_service import build_workflow_analytics
 
     profiles = [build_workflow_profile(record) for record in records]
     profiles.sort(key=lambda item: item.get("last_activity") or item.get("created_at") or "", reverse=True)
@@ -195,6 +243,7 @@ def build_workflow_status_payload(records: list[dict[str, Any]], queue_snapshot:
                     "state": event.get("state"),
                     "source": event.get("metadata", {}).get("source", "workflow-engine"),
                     "event_type": event.get("metadata", {}).get("event_type", event.get("status")),
+                    "severity": event.get("metadata", {}).get("severity", "info"),
                 }
             )
     activity_feed.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
@@ -217,4 +266,10 @@ def build_workflow_status_payload(records: list[dict[str, Any]], queue_snapshot:
             "background_jobs": "connected_to_in_memory_worker",
         },
         "transport": build_transport_capabilities(),
+        "contracts": build_contract_manifest(),
+        "analytics": analytics or build_workflow_analytics(records),
+        "observability": observability or build_observability_snapshot(records, queue_snapshot or {"size": 0, "pending": []}),
+        "event_query": event_query or {"results": activity_feed[:20], "total": len(activity_feed[:20]), "filters": active_filters or {}},
+        "integration_seams": build_integration_seams_payload(),
+        "active_filters": active_filters or {},
     }

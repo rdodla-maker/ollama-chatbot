@@ -17,7 +17,7 @@ export default function AIActivityFeed({ activity = [] }) {
           <span className={`activity-dot state-${item.state}`} />
           <div className="mission-feed-copy">
             <strong>{item.label}</strong>
-            <span>{item.filename} · {item.source} · {item.event_type}</span>
+            <span>{item.filename} · {item.source} · {item.event_type} · {item.severity || 'info'}</span>
           </div>
           <div className="mission-feed-meta">
             <span className={`mission-badge tone-${item.state}`}>{item.state}</span>

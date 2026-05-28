@@ -36,8 +36,13 @@ export default function WorkflowTimeline({ timeline = [] }) {
             </div>
             <div className="timeline-log">Source: {event.metadata?.source || 'workflow-engine'}</div>
             <div className="timeline-log">Event: {event.metadata?.event_type || event.status}</div>
+            {event.metadata?.severity ? <div className="timeline-log">Severity: {event.metadata.severity}</div> : null}
+            {event.metadata?.owner ? <div className="timeline-log">Owner: {event.metadata.owner}</div> : null}
+            {event.metadata?.previous_stage ? <div className="timeline-log">Previous stage: {event.metadata.previous_stage}</div> : null}
+            {event.metadata?.worker_owner ? <div className="timeline-log">Worker: {event.metadata.worker_owner}</div> : null}
             {event.metadata?.reason ? <div className="timeline-log">Reason: {event.metadata.reason}</div> : null}
             {event.metadata?.retry_count ? <div className="timeline-log">Retry attempt {event.metadata.retry_count}</div> : null}
+            {event.metadata?.resume_stage ? <div className="timeline-log">Resume stage: {event.metadata.resume_stage}</div> : null}
             {event.metadata?.action ? <div className="timeline-log">Action: {event.metadata.action}</div> : null}
           </div>
         </div>

@@ -135,6 +135,10 @@ class ProfileItem(BaseModel):
     retry_count: int = 0
     retry_history: list[dict] = Field(default_factory=list)
     failure_reason: str | None = None
+    candidate_profile: dict = Field(default_factory=dict)
+    candidate_memory: list[dict] = Field(default_factory=list)
+    resume_versions: list[dict] = Field(default_factory=list)
+    failure_diagnostics: dict = Field(default_factory=dict)
 
 
 class WorkflowActivityItem(BaseModel):
@@ -147,6 +151,7 @@ class WorkflowActivityItem(BaseModel):
     state: str
     source: str = "workflow-engine"
     event_type: str = "workflow.event"
+    severity: str = "info"
 
 
 class WorkflowOverview(BaseModel):
@@ -162,13 +167,98 @@ class QueueSnapshot(BaseModel):
     pending: list[dict] = Field(default_factory=list)
 
 
+class TransportCapabilities(BaseModel):
+    mode: str = "sse-primary"
+    supported: list[str] = Field(default_factory=list)
+    contract: str = "workflow-status-payload-v1"
+    event_contract: str = "workflow-event-envelope-v1"
+    event_version: int = 1
+    metadata_contract: str = "workflow-metadata-v1"
+    metadata_version: int = 1
+    filters: list[str] = Field(default_factory=list)
+    recovery: list[str] = Field(default_factory=list)
+
+
+class WorkflowContractManifest(BaseModel):
+    status_payload: str = "workflow-status-payload-v1"
+    event_envelope: str = "workflow-event-envelope-v1"
+    event_version: int = 1
+    metadata: str = "workflow-metadata-v1"
+    metadata_version: int = 1
+
+
+class IntegrationSeamItem(BaseModel):
+    status: str = "planned"
+    integration_type: str = "adapter"
+    contract: str = "workflow-event-envelope-v1"
+    entrypoint: str = "workflow events"
+
+
+class EventAggregationBucket(BaseModel):
+    key: str
+    count: int
+
+
+class WorkflowEventQueryResponse(BaseModel):
+    results: list[dict] = Field(default_factory=list)
+    total: int = 0
+    filters: dict = Field(default_factory=dict)
+    page: int = 1
+    page_size: int = 40
+    pages: int = 1
+    aggregations: dict[str, list[EventAggregationBucket]] = Field(default_factory=dict)
+
+
+class ResumeVersionReference(BaseModel):
+    id: str
+    version_label: str
+    ats_score: float | None = None
+
+
+class ResumeVersionComparison(BaseModel):
+    current_text: str = ""
+    previous_text: str = ""
+    added_lines: list[str] = Field(default_factory=list)
+    removed_lines: list[str] = Field(default_factory=list)
+    ats_delta: float | None = None
+    current_analysis: dict = Field(default_factory=dict)
+    previous_analysis: dict = Field(default_factory=dict)
+
+
+class ResumeVersionDetailResponse(BaseModel):
+    id: str
+    version_kind: str = ""
+    version_label: str = ""
+    source_filename: str | None = None
+    ats_score: float | None = None
+    change_summary: str | None = None
+    diff_summary: str | None = None
+    is_active: bool = False
+    created_at: str | None = None
+    previous_version: ResumeVersionReference | None = None
+    comparison: ResumeVersionComparison = Field(default_factory=ResumeVersionComparison)
+
+
+class ResumeVersionRollbackResponse(BaseModel):
+    version_id: str
+    candidate_key: str
+    version_label: str
+    status: str
+
+
 class WorkflowStatusResponse(BaseModel):
     profiles: list[ProfileItem] = Field(default_factory=list)
     activity_feed: list[WorkflowActivityItem] = Field(default_factory=list)
     overview: WorkflowOverview = Field(default_factory=WorkflowOverview)
     queue: QueueSnapshot = Field(default_factory=QueueSnapshot)
     automation_placeholders: dict = Field(default_factory=dict)
-    transport: dict = Field(default_factory=dict)
+    transport: TransportCapabilities = Field(default_factory=TransportCapabilities)
+    contracts: WorkflowContractManifest = Field(default_factory=WorkflowContractManifest)
+    analytics: dict = Field(default_factory=dict)
+    observability: dict = Field(default_factory=dict)
+    event_query: WorkflowEventQueryResponse = Field(default_factory=WorkflowEventQueryResponse)
+    integration_seams: dict[str, IntegrationSeamItem] = Field(default_factory=dict)
+    active_filters: dict = Field(default_factory=dict)
 
 
 class WorkflowActionRequest(BaseModel):

@@ -47,32 +47,28 @@ export async function analyzeResume(payload) {
   return data
 }
 
-export async function getWorkflowStatus() {
-  const { data } = await api.get('/workflow-status')
+export async function getWorkflowStatus(params = {}) {
+  const { data } = await api.get('/workflow-status', { params })
   return data
 }
 
-export function streamWorkflowStatus(handlers) {
-  const source = new EventSource(`${API_BASE}/workflow-status/stream`)
-
-  source.onmessage = (event) => {
-    try {
-      const payload = JSON.parse(event.data)
-      handlers.onEnvelope?.(payload)
-    } catch {
-      /* ignore malformed events */
-    }
-  }
-
-  source.onerror = () => {
-    handlers.onError?.('Workflow stream disconnected.')
-  }
-
-  return () => source.close()
+export async function getWorkflowEvents(params = {}) {
+  const { data } = await api.get('/workflow-events', { params })
+  return data
 }
 
 export async function performWorkflowAction(workflowId, action, stage) {
   const { data } = await api.post(`/workflow-status/${workflowId}/action`, { action, stage })
+  return data
+}
+
+export async function rollbackResumeVersion(versionId) {
+  const { data } = await api.post(`/resume-versions/${versionId}/rollback`)
+  return data
+}
+
+export async function getResumeVersionDetail(versionId) {
+  const { data } = await api.get(`/resume-versions/${versionId}`)
   return data
 }
 

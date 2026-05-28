@@ -9,12 +9,16 @@ import queue
 import time
 import logging
 import asyncio
-from services import analysis_service
+from services import analysis_service, workflow_execution_service
 from services.workflow_runtime import mark_active, set_last_error
+from services.worker_registry_service import acquire_lease, heartbeat, register_worker, release_lease, snapshot_registry
 
 logger = logging.getLogger("task_queue")
 
 _task_q: "queue.Queue[Dict[str,Any]]" = queue.Queue()
+_worker_thread: threading.Thread | None = None
+_worker_lock = threading.Lock()
+_stop_event = threading.Event()
 
 
 def enqueue_task(task: Dict[str, Any]) -> None:
@@ -71,50 +75,78 @@ def get_queue_snapshot() -> Dict[str, Any]:
             }
             for item in pending[:10]
         ],
+        "workers": snapshot_registry(),
     }
 
 
 def _worker_loop():
+    worker_id = threading.current_thread().name
+    register_worker(worker_id)
     logger.info("Background worker started")
-    while True:
+    while not _stop_event.is_set():
         try:
-            task = _task_q.get()
+            heartbeat(worker_id, status="idle")
+            task = _task_q.get(timeout=0.5)
             logger.info("Processing task: %s", task.get("type"))
             ttype = task.get("type")
             if ttype == "analyze_resume":
                 upload_id = task.get("upload_id")
                 workflow_id = task.get("workflow_id")
+                if not acquire_lease(workflow_id, worker_id):
+                    _task_q.put(task)
+                    time.sleep(0.05)
+                    continue
+                heartbeat(worker_id, status="busy", current_task={"workflow_id": workflow_id, "type": ttype})
                 mark_active(upload_id, True)
                 set_last_error(upload_id, None)
+                task["worker_id"] = worker_id
                 # run async analysis in event loop
                 try:
-                    asyncio.run(
-                        analysis_service.analyze_and_persist(
-                            upload_id,
-                            None,
-                            task.get("target_roles") or [],
-                            start_stage=task.get("retry_stage") or "processing",
-                        )
-                    )
+                    asyncio.run(workflow_execution_service.execute_workflow_task(task))
                 except analysis_service.WorkflowCancelledError:
                     logger.info("Workflow cancelled: %s", upload_id)
+                except analysis_service.WorkflowPausedError:
+                    logger.info("Workflow paused: %s", upload_id)
                 except Exception as exc:
                     if workflow_id:
-                        from services.workflow_orchestration_service import record_failure
-
-                        record_failure(workflow_id, str(exc), stage=task.get("retry_stage") or "ats_analysis")
+                        workflow_execution_service.record_failure(
+                            workflow_id,
+                            str(exc),
+                            stage=task.get("retry_stage") or "ats_analysis",
+                            retry_count=task.get("retry_count") or 0,
+                        )
                     set_last_error(upload_id, str(exc))
                     logger.exception("Background analysis task failed")
                 finally:
                     mark_active(upload_id, False)
+                    release_lease(workflow_id, worker_id)
+                    heartbeat(worker_id, status="idle")
             else:
                 # Placeholder: sleep to simulate work
                 time.sleep(0.1)
                 logger.info("Task complete: %s", task.get("type"))
+        except queue.Empty:
+            continue
         except Exception:
             logger.exception("Worker failed processing task")
+    logger.info("Background worker stopped")
 
 
 def start_worker_in_background():
-    t = threading.Thread(target=_worker_loop, daemon=True)
-    t.start()
+    global _worker_thread
+    with _worker_lock:
+        if _worker_thread and _worker_thread.is_alive():
+            return
+        _stop_event.clear()
+        _worker_thread = threading.Thread(target=_worker_loop, daemon=True, name="workflow-task-worker")
+        _worker_thread.start()
+
+
+def stop_worker(timeout: float = 2.0) -> None:
+    global _worker_thread
+    with _worker_lock:
+        if not _worker_thread:
+            return
+        _stop_event.set()
+        _worker_thread.join(timeout=timeout)
+        _worker_thread = None

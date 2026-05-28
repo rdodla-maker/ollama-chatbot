@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import Topbar from '../components/Topbar'
 import StatCard from '../components/StatCard'
 import WorkflowMissionControl from '../components/WorkflowMissionControl'
@@ -5,8 +6,11 @@ import { useWorkflowStatus } from '../hooks/useWorkflowStatus'
 
 export default function Dashboard({ status, trackerItems = [], onNavigate }) {
   const recentItems = trackerItems.slice(0, 3)
-  const { data, loading, refreshing, error, lastUpdated, refreshNow } = useWorkflowStatus({ pollMs: 10000, transport: 'sse' })
+  const [filters, setFilters] = useState({ workflow_id: '', stage: '', severity: '', event_type: '', status: '', search: '', from_date: '', to_date: '', page: 1, limit: 8 })
+  const { data, loading, refreshing, error, lastUpdated, refreshNow, connectionState } = useWorkflowStatus({ pollMs: 10000, transport: 'sse', filters })
   const overview = data.overview || { active: 0, completed: 0, failed: 0, queued: 0 }
+  const analytics = data.analytics || {}
+  const observability = data.observability || {}
 
   return (
     <div className="page page-wide">
@@ -70,8 +74,15 @@ export default function Dashboard({ status, trackerItems = [], onNavigate }) {
       <section className="stats-grid">
         <StatCard label="Active workflows" value={overview.active} detail="Currently executing AI workflow stages." tone="cyan" />
         <StatCard label="Completed" value={overview.completed} detail="Optimization-ready workflows." tone="purple" />
-        <StatCard label="Queued" value={overview.queued} detail="Waiting on the in-memory workflow engine." tone="blue" />
+        <StatCard label="Success rate" value={`${Math.round(analytics.workflow_success_rate || 0)}%`} detail="Filtered orchestration success across the current console view." tone="blue" />
         <StatCard label="Failed" value={overview.failed} detail="Runs needing manual attention or retry." tone="danger" />
+      </section>
+
+      <section className="stats-grid compact-stats-grid">
+        <StatCard label="Avg execution" value={analytics.average_execution_seconds ? `${Math.round(analytics.average_execution_seconds)}s` : '--'} detail="Average workflow duration." tone="cyan" />
+        <StatCard label="ATS average" value={analytics.ats_score_trends?.average ?? '--'} detail="Current ATS trend across filtered workflows." tone="purple" />
+        <StatCard label="Queue depth" value={observability.orchestration_metrics?.queue_depth ?? 0} detail="Pending orchestration tasks in the local worker queue." tone="blue" />
+        <StatCard label="Workers" value={observability.worker_metrics?.total_workers ?? 0} detail="Registered local workers and lease-aware execution readiness." tone="cyan" />
       </section>
 
       <section className="panel-card mission-control-panel">
@@ -81,7 +92,10 @@ export default function Dashboard({ status, trackerItems = [], onNavigate }) {
           refreshing={refreshing}
           error={error}
           lastUpdated={lastUpdated}
+          connectionState={connectionState}
           onRefresh={refreshNow}
+          filters={filters}
+          onFiltersChange={setFilters}
         />
       </section>
 

@@ -2,6 +2,8 @@
 
 Educational Agentic AI project with **FastAPI**, **React**, **Ollama**, **PDF RAG (ChromaDB)**, and a **LangGraph ReAct agent** with tools, memory, and codebase search.
 
+Internal platform stabilization for the AI Career Copilot orchestration layer is documented in [docs/stage1-internal-platform.md](docs/stage1-internal-platform.md).
+
 ## Features
 
 - Local LLM via [Ollama](https://ollama.com)

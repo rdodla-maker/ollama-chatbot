@@ -16,6 +16,7 @@ def _ensure(upload_id: str) -> dict[str, Any]:
             upload_id,
             {
                 "cancel_requested": False,
+                "pause_requested": False,
                 "active": False,
                 "last_error": None,
             },
@@ -24,9 +25,9 @@ def _ensure(upload_id: str) -> dict[str, Any]:
 
 def get_runtime_state(upload_id: str | None) -> dict[str, Any]:
     if not upload_id:
-        return {"cancel_requested": False, "active": False, "last_error": None}
+        return {"cancel_requested": False, "pause_requested": False, "active": False, "last_error": None}
     with _lock:
-        return dict(_controls.get(upload_id, {"cancel_requested": False, "active": False, "last_error": None}))
+        return dict(_controls.get(upload_id, {"cancel_requested": False, "pause_requested": False, "active": False, "last_error": None}))
 
 
 def mark_active(upload_id: str | None, active: bool) -> None:
@@ -51,6 +52,22 @@ def clear_cancel(upload_id: str | None) -> None:
     state = _ensure(upload_id)
     with _lock:
         state["cancel_requested"] = False
+
+
+def request_pause(upload_id: str | None) -> None:
+    if not upload_id:
+        return
+    state = _ensure(upload_id)
+    with _lock:
+        state["pause_requested"] = True
+
+
+def clear_pause(upload_id: str | None) -> None:
+    if not upload_id:
+        return
+    state = _ensure(upload_id)
+    with _lock:
+        state["pause_requested"] = False
 
 
 def set_last_error(upload_id: str | None, reason: str | None) -> None:

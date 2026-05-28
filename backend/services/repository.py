@@ -4,6 +4,13 @@ from models.db_models import ResumeProfile
 from datetime import datetime
 import json
 
+from services.candidate_intelligence_service import (
+    build_candidate_snapshot,
+    register_uploaded_resume_version,
+    sync_candidate_intelligence,
+)
+from services.workflow_contracts import normalize_event_metadata
+
 
 def create_profile_db(db: Session, uploaded_filename: str, parsed_text: str, target_roles: List[str]) -> ResumeProfile:
     workflow_history = json.dumps(
@@ -12,12 +19,18 @@ def create_profile_db(db: Session, uploaded_filename: str, parsed_text: str, tar
                 "when": datetime.utcnow().isoformat(),
                 "status": "uploaded",
                 "metadata": {
-                    "stage": "resume_uploaded",
+                    **normalize_event_metadata(
+                        event_type="workflow.created",
+                        stage="resume_uploaded",
+                        status="uploaded",
+                        source="workflow-engine",
+                        owner="workflow-engine",
+                        severity="info",
+                        lifecycle="created",
+                    ),
                     "label": "Resume uploaded",
                     "progress": 10,
                     "state": "completed",
-                    "source": "workflow-engine",
-                    "event_type": "workflow.created",
                 },
             }
         ]
@@ -33,6 +46,11 @@ def create_profile_db(db: Session, uploaded_filename: str, parsed_text: str, tar
     db.commit()
     db.refresh(rp)
     try:
+        register_uploaded_resume_version(db, rp, parsed_text)
+        db.commit()
+    except Exception:
+        db.rollback()
+    try:
         from services.workflow_event_bus import publish_event
 
         publish_event(
@@ -43,6 +61,7 @@ def create_profile_db(db: Session, uploaded_filename: str, parsed_text: str, tar
                 "workflow_id": rp.id,
                 "uploaded_filename": rp.uploaded_filename,
                 "stage": "resume_uploaded",
+                "status": "uploaded",
             },
         )
     except Exception:
@@ -82,6 +101,21 @@ def update_profile_db(db: Session, profile_id: str, profile_obj: dict) -> Option
     db.commit()
     db.refresh(rp)
     try:
+        sync_candidate_intelligence(
+            db,
+            rp,
+            rp.parsed_text,
+            parsed if isinstance(parsed, dict) else None,
+            json.loads(rp.target_roles or "[]"),
+            {
+                **(profile_obj.get("metadata") or {}),
+                "timestamp": hist[-1].get("when") if hist else datetime.utcnow().isoformat(),
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    try:
         from services.workflow_event_bus import publish_event
 
         current = hist[-1] if hist else {"status": rp.status, "metadata": profile_obj.get("metadata") or {}}
@@ -120,6 +154,7 @@ def list_profiles_db(db: Session) -> List[dict]:
             workflow_history = json.loads(r.workflow_history) if r.workflow_history else []
         except Exception:
             workflow_history = []
+        candidate_profile, candidate_memory, resume_versions = build_candidate_snapshot(db, r.uploaded_filename)
         out.append(
             {
                 "id": r.id,
@@ -132,6 +167,9 @@ def list_profiles_db(db: Session) -> List[dict]:
                 "ats_score": r.ats_score,
                 "workflow_history": workflow_history,
                 "analysis_raw": r.analysis_raw,
+                "candidate_profile": candidate_profile,
+                "candidate_memory": candidate_memory,
+                "resume_versions": resume_versions,
             }
         )
     return out

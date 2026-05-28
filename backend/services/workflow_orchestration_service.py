@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from services.profile_store import list_profiles, update_profile
-from services.workflow_runtime import clear_cancel, request_cancel
+from services.workflow_contracts import build_transport_capabilities as build_contract_transport_capabilities, normalize_event_metadata
+from services.workflow_runtime import clear_cancel, clear_pause, request_cancel, request_pause
 
 RETRY_LIMIT = 3
-PLACEHOLDER_ACTIONS = {"pause", "resume"}
 TERMINAL_STATES = {"completed", "failed", "cancelled"}
 RETRYABLE_STAGES = {
     "parsing_started": "Retry parsing",
@@ -21,6 +21,7 @@ FAILURE_EVENT_TYPES = {
     "ats_analysis": "analysis.failed",
     "optimization_ready": "optimization.failed",
 }
+RESUMABLE_STAGES = {"processing", "parsing_started", "skills_extracted", "ats_analysis", "optimization_ready"}
 
 
 def _find_record(workflow_id: str) -> dict[str, Any] | None:
@@ -32,6 +33,14 @@ def _find_record(workflow_id: str) -> dict[str, Any] | None:
 
 def _workflow_events(record: dict[str, Any]) -> list[dict[str, Any]]:
     return record.get("workflow_history") or []
+
+
+def _current_stage(record: dict[str, Any]) -> str:
+    events = _workflow_events(record)
+    if not events:
+        return record.get("status") or "queued"
+    metadata = events[-1].get("metadata") or {}
+    return metadata.get("stage") or events[-1].get("status") or record.get("status") or "queued"
 
 
 def _retry_count(record: dict[str, Any]) -> int:
@@ -85,6 +94,17 @@ def _normalized_state(record: dict[str, Any]) -> str:
     return status
 
 
+def _resolve_retry_stage(action: str, stage: str | None, paused_metadata: dict[str, Any], current_stage: str) -> str:
+    if action == "restart":
+        return "processing"
+    candidate = stage or paused_metadata.get("resume_stage") or ("ats_analysis" if action == "retry" else current_stage)
+    if action == "retry" and candidate not in RETRYABLE_STAGES:
+        raise ValueError("Retry stage is not supported")
+    if action == "resume" and candidate not in RESUMABLE_STAGES:
+        raise ValueError("Resume stage is not supported")
+    return candidate
+
+
 def get_available_actions(record: dict[str, Any]) -> list[dict[str, Any]]:
     state = _normalized_state(record)
     retry_count = _retry_count(record)
@@ -114,8 +134,22 @@ def get_available_actions(record: dict[str, Any]) -> list[dict[str, Any]]:
             "reason": None if state in TERMINAL_STATES and retry_count < RETRY_LIMIT else "Restart is only available for completed, failed, or cancelled workflows.",
         }
     )
-    items.append({"action": "pause", "label": "Pause", "enabled": False, "reason": "Placeholder for future real-time worker controls."})
-    items.append({"action": "resume", "label": "Resume", "enabled": False, "reason": "Placeholder for future real-time worker controls."})
+    items.append(
+        {
+            "action": "pause",
+            "label": "Pause",
+            "enabled": state in {"queued", "processing", "retrying"},
+            "reason": None if state in {"queued", "processing", "retrying"} else "Pause is only available for queued or active workflows.",
+        }
+    )
+    items.append(
+        {
+            "action": "resume",
+            "label": "Resume",
+            "enabled": state == "paused",
+            "reason": None if state == "paused" else "Resume is only available after a workflow has been paused.",
+        }
+    )
     return items
 
 
@@ -137,42 +171,15 @@ def get_stage_retry_actions(record: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def record_failure(workflow_id: str, reason: str, stage: str | None = None) -> None:
-    record = _find_record(workflow_id)
-    if not record:
-        return
-    failed_stage = stage or "workflow"
-    update_profile(
-        workflow_id,
-        {
-            "status": "failed",
-            "target_roles": record.get("target_roles") or [],
-            "metadata": {
-                "stage": failed_stage,
-                "label": f"{failed_stage.replace('_', ' ').title()} failed",
-                "progress": 100,
-                "state": "failed",
-                "reason": reason,
-                "failure_reason": reason,
-                "source": "workflow-engine",
-                "event_type": FAILURE_EVENT_TYPES.get(failed_stage, f"{failed_stage}.failed"),
-            },
-        },
-    )
+    from services.workflow_execution_service import record_failure as execution_record_failure
+
+    execution_record_failure(workflow_id, reason, stage=stage)
 
 
 def apply_workflow_action(workflow_id: str, action: str, stage: str | None = None) -> dict[str, Any]:
     record = _find_record(workflow_id)
     if not record:
         raise ValueError("Workflow not found")
-
-    if action in PLACEHOLDER_ACTIONS:
-        return {
-            "workflow_id": workflow_id,
-            "action": action,
-            "status": "placeholder",
-            "message": f"{action.title()} is reserved for future automation controls.",
-            "stage": stage,
-        }
 
     available = {item["action"]: item for item in get_available_actions(record)}
     selected = available.get(action)
@@ -184,7 +191,9 @@ def apply_workflow_action(workflow_id: str, action: str, stage: str | None = Non
     retry_count = _retry_count(record)
     upload_id = record.get("uploaded_filename")
     target_roles = record.get("target_roles") or []
-    retry_stage = stage or ("processing" if action == "restart" else "ats_analysis")
+    current_stage = _current_stage(record)
+    paused_metadata = (_workflow_events(record)[-1].get("metadata") or {}) if _workflow_events(record) else {}
+    retry_stage = _resolve_retry_stage(action, stage, paused_metadata, current_stage)
 
     if action == "cancel":
         request_cancel(upload_id)
@@ -194,16 +203,22 @@ def apply_workflow_action(workflow_id: str, action: str, stage: str | None = Non
             {
                 "status": "cancelled",
                 "target_roles": target_roles,
-                "metadata": {
-                    "stage": "cancelled",
-                    "label": "Workflow cancelled",
-                    "progress": 100 if removed else 70,
-                    "state": "cancelled",
-                    "action": action,
-                    "reason": "Cancelled by user",
-                    "source": "workflow-engine",
-                    "event_type": "workflow.cancelled",
-                },
+                "metadata": normalize_event_metadata(
+                    event_type="workflow.cancelled",
+                    stage="cancelled",
+                    status="cancelled",
+                    source="workflow-engine",
+                    owner="workflow-engine",
+                    severity="warning",
+                    lifecycle="cancelled",
+                    extra={
+                        "label": "Workflow cancelled",
+                        "progress": 100 if removed else 70,
+                        "state": "cancelled",
+                        "action": action,
+                        "reason": "Cancelled by user",
+                    },
+                ),
             },
         )
         return {
@@ -214,25 +229,116 @@ def apply_workflow_action(workflow_id: str, action: str, stage: str | None = Non
             "stage": None,
         }
 
+    if action == "pause":
+        request_pause(upload_id)
+        removed = cancel_queued_workflow(workflow_id, upload_id)
+        update_profile(
+            workflow_id,
+            {
+                "status": "paused",
+                "target_roles": target_roles,
+                "metadata": normalize_event_metadata(
+                    event_type="workflow.paused",
+                    stage="paused",
+                    status="paused",
+                    source="workflow-engine",
+                    owner="workflow-engine",
+                    severity="warning",
+                    lifecycle="paused",
+                    extra={
+                        "label": "Workflow paused",
+                        "progress": 25 if removed else 60,
+                        "state": "paused",
+                        "action": action,
+                        "reason": "Paused by user",
+                        "resume_stage": stage or current_stage,
+                        "checkpoint_stage": current_stage,
+                        "previous_stage": current_stage,
+                    },
+                ),
+            },
+        )
+        return {
+            "workflow_id": workflow_id,
+            "action": action,
+            "status": "paused",
+            "message": "Workflow paused and checkpoint preserved.",
+            "stage": stage or current_stage,
+        }
+
+    if action == "resume":
+        clear_pause(upload_id)
+        update_profile(
+            workflow_id,
+            {
+                "status": "retrying",
+                "target_roles": target_roles,
+                "metadata": normalize_event_metadata(
+                    event_type="workflow.resumed",
+                    stage="retrying",
+                    status="retrying",
+                    source="workflow-engine",
+                    owner="workflow-engine",
+                    severity="info",
+                    lifecycle="resume",
+                    extra={
+                        "label": "Workflow resume queued",
+                        "progress": 35,
+                        "state": "retrying",
+                        "action": action,
+                        "retry_stage": retry_stage,
+                        "retry_count": retry_count,
+                        "reason": _last_failure_reason(record),
+                        "previous_stage": current_stage,
+                    },
+                ),
+            },
+        )
+        enqueue_task(
+            {
+                "type": "analyze_resume",
+                "upload_id": upload_id,
+                "workflow_id": workflow_id,
+                "target_roles": target_roles,
+                "retry_count": retry_count,
+                "retry_stage": retry_stage,
+            }
+        )
+        return {
+            "workflow_id": workflow_id,
+            "action": action,
+            "status": "queued",
+            "message": f"Workflow queued to resume from {retry_stage.replace('_', ' ')}.",
+            "stage": retry_stage,
+        }
+
     attempt = retry_count + 1
     clear_cancel(upload_id)
+    clear_pause(upload_id)
     update_profile(
         workflow_id,
         {
             "status": "retrying",
             "target_roles": target_roles,
-            "metadata": {
-                "stage": "retrying",
-                "label": "Workflow retry queued" if action == "retry" else "Workflow restart queued",
-                "progress": 25,
-                "state": "retrying",
-                "action": action,
-                "retry_stage": retry_stage,
-                "retry_count": attempt,
-                "reason": _last_failure_reason(record),
-                "source": "workflow-engine",
-                "event_type": "retry.started",
-            },
+            "metadata": normalize_event_metadata(
+                event_type="retry.started",
+                stage="retrying",
+                status="retrying",
+                source="workflow-engine",
+                owner="workflow-engine",
+                severity="warning" if action == "retry" else "info",
+                lifecycle="retry",
+                extra={
+                    "label": "Workflow retry queued" if action == "retry" else "Workflow restart queued",
+                    "progress": 25,
+                    "state": "retrying",
+                    "action": action,
+                    "retry_stage": retry_stage,
+                    "retry_count": attempt,
+                    "reason": _last_failure_reason(record),
+                    "previous_stage": current_stage,
+                },
+            ),
         },
     )
     enqueue_task(
@@ -259,8 +365,4 @@ def apply_workflow_action(workflow_id: str, action: str, stage: str | None = Non
 
 
 def build_transport_capabilities() -> dict[str, Any]:
-    return {
-        "mode": "sse-primary",
-        "supported": ["polling", "sse", "websocket-ready", "multi-client-ready"],
-        "contract": "workflow-status-payload-v1",
-    }
+    return build_contract_transport_capabilities()

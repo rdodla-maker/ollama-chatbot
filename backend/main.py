@@ -5,6 +5,7 @@ Run from the backend directory:
   uvicorn main:app --reload
 """
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -29,10 +30,35 @@ logger = get_logger("api")
 Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
 Path(settings.chroma_path).mkdir(parents=True, exist_ok=True)
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    logger.info("Backend started - Ollama model: %s", settings.ollama_model)
+    logger.info("Allowed filesystem root: %s", settings.allowed_fs_root)
+    try:
+        from db import init_db
+        from services.task_queue import start_worker_in_background, stop_worker
+
+        init_db()
+        start_worker_in_background()
+        logger.info("Database initialized and background worker started")
+    except Exception:
+        logger.exception("Failed to initialize DB or background worker")
+    try:
+        yield
+    finally:
+        try:
+            from services.task_queue import stop_worker
+
+            stop_worker()
+        except Exception:
+            logger.exception("Failed during background worker shutdown")
+
 app = FastAPI(
     title="Agentic AI Backend",
     description="Ollama + RAG + Autonomous Agent API",
     version="3.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -92,19 +118,3 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             detail="An unexpected error occurred.",
         ).model_dump(),
     )
-
-
-@app.on_event("startup")
-async def on_startup():
-    logger.info("Backend started — Ollama model: %s", settings.ollama_model)
-    logger.info("Allowed filesystem root: %s", settings.allowed_fs_root)
-    # Initialize SQLite database and background worker scaffolding
-    try:
-        from db import init_db
-        from services.task_queue import start_worker_in_background
-
-        init_db()
-        start_worker_in_background()
-        logger.info("Database initialized and background worker started")
-    except Exception:
-        logger.exception("Failed to initialize DB or background worker")

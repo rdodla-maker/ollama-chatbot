@@ -112,3 +112,79 @@ def test_stage_retry_actions_available_after_failure():
 
     assert len(actions) == 3
     assert all(item["enabled"] for item in actions)
+
+
+def test_apply_pause_marks_checkpoint(monkeypatch):
+    record = {
+        "id": "wf-pause",
+        "uploaded_filename": "resume-pause.pdf",
+        "status": "processing",
+        "target_roles": ["Product Engineer"],
+        "workflow_history": [
+            {"when": "2026-05-28T10:00:00", "status": "processing", "metadata": {"stage": "processing"}},
+        ],
+    }
+    updates = []
+    pauses = []
+
+    monkeypatch.setattr(orchestration, "list_profiles", lambda: [record])
+    monkeypatch.setattr(orchestration, "update_profile", lambda workflow_id, payload: updates.append((workflow_id, payload)) or {})
+    monkeypatch.setattr(orchestration, "request_pause", lambda upload_id: pauses.append(upload_id))
+    monkeypatch.setattr("services.task_queue.cancel_queued_workflow", lambda workflow_id, upload_id: False)
+
+    result = orchestration.apply_workflow_action("wf-pause", "pause")
+
+    assert result["status"] == "paused"
+    assert pauses == ["resume-pause.pdf"]
+    assert updates[0][1]["metadata"]["resume_stage"] == "processing"
+
+
+def test_apply_resume_enqueues_from_checkpoint(monkeypatch):
+    record = {
+        "id": "wf-resume",
+        "uploaded_filename": "resume-resume.pdf",
+        "status": "paused",
+        "target_roles": ["ML Engineer"],
+        "workflow_history": [
+            {
+                "when": "2026-05-28T10:00:00",
+                "status": "paused",
+                "metadata": {"stage": "paused", "resume_stage": "ats_analysis"},
+            },
+        ],
+    }
+    updates = []
+    tasks = []
+    cleared = []
+
+    monkeypatch.setattr(orchestration, "list_profiles", lambda: [record])
+    monkeypatch.setattr(orchestration, "update_profile", lambda workflow_id, payload: updates.append((workflow_id, payload)) or {})
+    monkeypatch.setattr(orchestration, "clear_pause", lambda upload_id: cleared.append(upload_id))
+    monkeypatch.setattr("services.task_queue.enqueue_task", lambda task: tasks.append(task))
+
+    result = orchestration.apply_workflow_action("wf-resume", "resume")
+
+    assert result["status"] == "queued"
+    assert cleared == ["resume-resume.pdf"]
+    assert tasks[0]["retry_stage"] == "ats_analysis"
+    assert updates[0][1]["metadata"]["event_type"] == "workflow.resumed"
+
+
+def test_apply_retry_rejects_unsupported_stage(monkeypatch):
+    record = {
+        "id": "wf-invalid-stage",
+        "uploaded_filename": "resume-invalid.pdf",
+        "status": "failed",
+        "target_roles": [],
+        "workflow_history": [
+            {"when": "2026-05-27T10:00:00", "status": "failed", "metadata": {"reason": "network"}},
+        ],
+    }
+
+    monkeypatch.setattr(orchestration, "list_profiles", lambda: [record])
+
+    try:
+        orchestration.apply_workflow_action("wf-invalid-stage", "retry", "queued")
+        assert False, "Expected invalid retry stage to be rejected"
+    except ValueError as exc:
+        assert "Retry stage is not supported" in str(exc)

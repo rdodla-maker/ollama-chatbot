@@ -2,10 +2,12 @@
 
 import asyncio
 import json
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
+from sse_starlette import EventSourceResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from agent import ask_agent
@@ -27,9 +29,12 @@ from models.schemas import (
     ResumeUploadResponse,
     AnalyzeResumeRequest,
     AnalyzeResumeResponse,
+    ResumeVersionDetailResponse,
+    ResumeVersionRollbackResponse,
     WorkflowStatusResponse,
     WorkflowActionRequest,
     WorkflowActionResponse,
+    WorkflowEventQueryResponse,
 )
 from rag.codebase_index import index_codebase
 from rag.vector_store import ingest_pdf, search_chunks_with_metadata
@@ -44,18 +49,16 @@ from services.resume_parsing_service import extract_text_from_resume
 from services.profile_store import create_profile, update_profile, list_profiles
 from services.workflow_status_service import build_workflow_status_payload
 from services.workflow_orchestration_service import apply_workflow_action
-from services.workflow_event_bus import build_snapshot_event, subscribe, unsubscribe
-import uuid
-from pathlib import Path
-import json
+from services.workflow_stream_service import stream_workflow_events
+from services.workflow_analytics_service import build_workflow_analytics
+from services.observability_service import build_observability_snapshot, build_failure_diagnostics
+from services.workflow_query_service import filter_workflow_records, search_workflow_events
+from services.candidate_intelligence_service import get_resume_version_detail, rollback_resume_version
+from db import SessionLocal
 
 logger = get_logger("api")
 
 router = APIRouter()
-
-
-def _sse_data(payload: dict) -> str:
-    return f"data: {json.dumps(payload)}\n\n"
 
 
 def _safe_filename(name: str) -> str:
@@ -243,7 +246,18 @@ async def analyze_resume(body: AnalyzeResumeRequest):
 
 
 @router.get("/workflow-status", response_model=WorkflowStatusResponse)
-async def workflow_status():
+async def workflow_status(
+    workflow_id: str | None = None,
+    event_type: str | None = None,
+    stage: str | None = None,
+    severity: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    page: int = 1,
+    limit: int = 40,
+):
     records = await asyncio.to_thread(list_profiles)
     try:
         from services.task_queue import get_queue_snapshot
@@ -251,29 +265,89 @@ async def workflow_status():
         queue_snapshot = get_queue_snapshot()
     except Exception:
         queue_snapshot = {"size": 0, "pending": []}
-    payload = build_workflow_status_payload(records, queue_snapshot)
+    filters = {
+        "workflow_id": workflow_id,
+        "event_type": event_type,
+        "stage": stage,
+        "severity": severity,
+        "status": status,
+        "search": search,
+        "from_date": from_date,
+        "to_date": to_date,
+    }
+    enriched_records = [
+        {
+            **record,
+            "failure_diagnostics": build_failure_diagnostics(record),
+        }
+        for record in records
+    ]
+    filtered_records = filter_workflow_records(enriched_records, filters)
+    payload = build_workflow_status_payload(
+        filtered_records,
+        queue_snapshot,
+        analytics=build_workflow_analytics(filtered_records),
+        observability=build_observability_snapshot(filtered_records, queue_snapshot),
+        event_query=search_workflow_events(enriched_records, filters, limit=limit, page=page),
+        active_filters={key: value for key, value in filters.items() if value},
+    )
     return WorkflowStatusResponse(**payload)
 
 
+@router.get("/workflow-events", response_model=WorkflowEventQueryResponse)
+async def workflow_events(
+    workflow_id: str | None = None,
+    event_type: str | None = None,
+    stage: str | None = None,
+    severity: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    limit: int = 40,
+    page: int = 1,
+):
+    records = await asyncio.to_thread(list_profiles)
+    filters = {
+        "workflow_id": workflow_id,
+        "event_type": event_type,
+        "stage": stage,
+        "severity": severity,
+        "status": status,
+        "search": search,
+        "from_date": from_date,
+        "to_date": to_date,
+    }
+    return search_workflow_events(records, filters, limit=limit, page=page)
+
+
 @router.get("/workflow-status/stream")
-async def workflow_status_stream(request: Request):
-    subscriber_id, event_queue = subscribe()
-
-    async def event_stream():
-        try:
-            yield _sse_data(build_snapshot_event())
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    envelope = await asyncio.wait_for(asyncio.to_thread(event_queue.get, True, 10), timeout=12)
-                    yield _sse_data(envelope)
-                except asyncio.TimeoutError:
-                    yield _sse_data({"type": "heartbeat", "timestamp": asyncio.get_running_loop().time()})
-        finally:
-            unsubscribe(subscriber_id)
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+async def workflow_status_stream(
+    request: Request,
+    workflow_id: str | None = None,
+    event_type: str | None = None,
+    source: str | None = None,
+    stage: str | None = None,
+    severity: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+):
+    return EventSourceResponse(
+        stream_workflow_events(
+            request,
+            workflow_id=workflow_id,
+            event_type=event_type,
+            source=source,
+            stage=stage,
+            severity=severity,
+            status=status,
+            search=search,
+            from_date=from_date,
+            to_date=to_date,
+        )
+    )
 
 
 @router.post("/workflow-status/{workflow_id}/action", response_model=WorkflowActionResponse)
@@ -283,6 +357,30 @@ async def workflow_action(workflow_id: str, body: WorkflowActionRequest):
         return WorkflowActionResponse(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/resume-versions/{version_id}/rollback", response_model=ResumeVersionRollbackResponse)
+async def rollback_resume_version_route(version_id: str):
+    db = SessionLocal()
+    try:
+        result = await asyncio.to_thread(rollback_resume_version, db, version_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Resume version not found")
+        return result
+    finally:
+        db.close()
+
+
+@router.get("/resume-versions/{version_id}", response_model=ResumeVersionDetailResponse)
+async def resume_version_detail_route(version_id: str):
+    db = SessionLocal()
+    try:
+        result = await asyncio.to_thread(get_resume_version_detail, db, version_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Resume version not found")
+        return result
+    finally:
+        db.close()
 
 
 @router.post("/index-codebase", response_model=CodebaseIndexResponse)
