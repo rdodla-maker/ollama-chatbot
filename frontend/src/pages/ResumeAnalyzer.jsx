@@ -1,64 +1,133 @@
+import { useState } from 'react'
 import Topbar from '../components/Topbar'
 
-export default function ResumeAnalyzer({ status, latestResult }) {
+export default function ResumeAnalyzer({ status, latestResult, onNavigate }) {
+  const [uploadedFile, setUploadedFile] = useState(null)
+  const [isDragActive, setIsDragActive] = useState(false)
+
+  // Mock data - replace with actual state from parent or API
+  const currentResume = latestResult?.resume_name || uploadedFile?.name || 'No resume uploaded yet'
+  const lastUpdated = latestResult?.upload_date || new Date().toLocaleDateString()
+  const hasResume = latestResult || uploadedFile
+
+  function handleFileChange(e) {
+    const file = e.target.files?.[0]
+    if (file) {
+      setUploadedFile(file)
+    }
+  }
+
+  function handleDrop(e) {
+    e.preventDefault()
+    setIsDragActive(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      setUploadedFile(file)
+    }
+  }
+
+  function handleDownload() {
+    // Implement download logic here
+    alert('Download functionality to be implemented')
+  }
+
   return (
     <div className="page page-wide">
       <Topbar
-        title="Resume Analyzer"
-        subtitle="Review AI suggestions for improving your resume against a target job."
+        title="Resume"
+        subtitle="Manage your resume and start applying to jobs"
         status={status}
       />
 
-      <section className="page-intro-card panel-inset">
-        <div>
-          <span className="section-kicker">Resume intelligence</span>
-          <h2>See exactly how to strengthen your resume for the target role.</h2>
+      <section className="panel-card resume-management-card">
+        <div className="panel-card-header">
+          <div>
+            <span className="section-kicker">Your Resume</span>
+            <h3>Current resume</h3>
+          </div>
         </div>
-        <p>
-          This workspace turns your latest AI suggestions into a clearer improvement plan so you can refine impact,
-          phrasing, and alignment before applying.
-        </p>
+
+        {hasResume ? (
+          <div className="resume-status-card panel-inset">
+            <div className="resume-status-header">
+              <div className="resume-status-icon">📄</div>
+              <div className="resume-status-details">
+                <h4>{currentResume}</h4>
+                <p className="resume-status-date">Last updated: {lastUpdated}</p>
+              </div>
+            </div>
+            <div className="resume-status-actions">
+              <button type="button" className="btn-ghost" onClick={handleDownload}>
+                ⬇ Download Optimized Resume
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="empty-state resume-empty-state">
+            <div className="empty-state-icon">📄</div>
+            <h3>No resume uploaded</h3>
+            <p>Upload your resume to get started with AI-powered job applications.</p>
+          </div>
+        )}
+
+        <div className="resume-upload-section">
+          <h4>Replace or upload resume</h4>
+          <p className="muted-block">Upload a new resume to update your profile and start applying.</p>
+          
+          <label
+            className={`upload-dropzone panel-inset ${isDragActive ? 'drag-active' : ''} ${uploadedFile ? 'has-file' : ''}`}
+            onDragEnter={(e) => { e.preventDefault(); setIsDragActive(true) }}
+            onDragOver={(e) => { e.preventDefault(); setIsDragActive(true) }}
+            onDragLeave={(e) => { e.preventDefault(); setIsDragActive(false) }}
+            onDrop={handleDrop}
+          >
+            <input 
+              className="sr-only-input" 
+              type="file" 
+              accept=".pdf,.doc,.docx" 
+              onChange={handleFileChange} 
+            />
+            <span className="upload-dropzone-icon">+</span>
+            <strong>{uploadedFile ? uploadedFile.name : 'Drag and drop your resume here'}</strong>
+            <span>{uploadedFile ? 'Ready to upload' : 'or click to browse for a file'}</span>
+            <span className="upload-hint">Accepts PDF, DOC, or DOCX</span>
+          </label>
+
+          {uploadedFile && (
+            <div className="resume-upload-actions">
+              <button type="button" className="btn-ghost" onClick={() => setUploadedFile(null)}>
+                Cancel
+              </button>
+              <button type="button" className="btn-primary" onClick={() => onNavigate?.('resume')}>
+                Upload & Start Apply
+              </button>
+            </div>
+          )}
+        </div>
       </section>
 
-      <div className="panel-grid two-column analyzer-layout">
-        <div className="panel-card">
-          <div className="panel-card-header">
-            <div>
-              <span className="section-kicker">Checklist</span>
-              <h3>Optimization areas</h3>
-            </div>
-          </div>
-          <div className="quick-actions-grid">
-            <div className="quick-action-card static-card">
-              <strong>Match keywords</strong>
-              <span>Mirror the job description with precise technology and domain terms.</span>
-            </div>
-            <div className="quick-action-card static-card">
-              <strong>Quantify outcomes</strong>
-              <span>Show business impact with measurable results instead of generic responsibilities.</span>
-            </div>
-            <div className="quick-action-card static-card">
-              <strong>Sharpen summaries</strong>
-              <span>Lead with a concise profile that anchors your strongest value for the role.</span>
-            </div>
+      <section className="panel-card resume-tips-card">
+        <div className="panel-card-header">
+          <div>
+            <span className="section-kicker">Tips</span>
+            <h3>Optimize your resume</h3>
           </div>
         </div>
-
-        <div className="panel-card results-card">
-          <div className="panel-card-header">
-            <div>
-              <span className="section-kicker">AI review</span>
-              <h3>Resume suggestions</h3>
-            </div>
-            <span className="soft-pill accent">Tailored analysis</span>
+        <div className="resume-tips-grid">
+          <div className="resume-tip-card">
+            <strong>📊 Use numbers</strong>
+            <p>Quantify your achievements with specific metrics and results.</p>
           </div>
-          <div className="result-body result-body-article">
-            <pre>
-              {latestResult?.resume_suggestions || 'Generate an application pack first to see tailored resume guidance here.'}
-            </pre>
+          <div className="resume-tip-card">
+            <strong>🎯 Match keywords</strong>
+            <p>Include relevant skills and technologies from job descriptions.</p>
+          </div>
+          <div className="resume-tip-card">
+            <strong>✨ Keep it concise</strong>
+            <p>Focus on impact and relevant experience for your target roles.</p>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   )
 }

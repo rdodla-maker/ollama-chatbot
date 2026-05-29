@@ -1,148 +1,206 @@
-import { useState } from 'react'
 import Topbar from '../components/Topbar'
 import StatCard from '../components/StatCard'
-import WorkflowMissionControl from '../components/WorkflowMissionControl'
-import { useWorkflowStatus } from '../hooks/useWorkflowStatus'
 
 export default function Dashboard({ status, trackerItems = [], onNavigate }) {
-  const recentItems = trackerItems.slice(0, 3)
-  const [filters, setFilters] = useState({ workflow_id: '', stage: '', severity: '', event_type: '', status: '', search: '', from_date: '', to_date: '', page: 1, limit: 8 })
-  const { data, loading, refreshing, error, lastUpdated, refreshNow, connectionState } = useWorkflowStatus({ pollMs: 10000, transport: 'sse', filters })
-  const overview = data.overview || { active: 0, completed: 0, failed: 0, queued: 0 }
-  const analytics = data.analytics || {}
-  const observability = data.observability || {}
+  const recentItems = trackerItems.slice(0, 5)
+  const counts = {
+    applied: trackerItems.filter((item) => item.status === 'applied').length,
+    pending: trackerItems.filter((item) => item.status === 'pending').length,
+    interviews: trackerItems.filter((item) => item.status === 'interview').length,
+    rejected: trackerItems.filter((item) => item.status === 'rejected').length,
+  }
+
+  const hasApplications = trackerItems.length > 0
+  const totalApplications = trackerItems.length
 
   return (
     <div className="page page-wide">
       <Topbar
-        title="AI Mission Control"
-        subtitle="Monitor live resume intelligence workflows, AI activity, and automation readiness from one control surface."
+        title="Dashboard"
+        subtitle="Your AI Job Application Assistant"
         status={status}
       />
 
-      <section className="hero-card">
-        <div className="hero-grid">
-          <div>
-            <p className="eyebrow">AI Career Copilot</p>
-            <h2>Operate live resume intelligence workflows like a compact mission control system.</h2>
-            <p>
-              Watch each workflow move from upload through parsing, scoring, and optimization readiness,
-              with live SSE delivery now and multi-transport orchestration ready next.
+      {/* Premium Hero Section */}
+      <section className="hero-card dashboard-hero-card premium-hero">
+        <div className="hero-content">
+          <div className="hero-main">
+            <p className="eyebrow">AI-Powered Job Search</p>
+            <h1 className="hero-headline">Land More Interviews With AI</h1>
+            <p className="hero-subtitle">
+              Upload your resume, choose job roles, and let AI automate your job search.
             </p>
             <div className="hero-actions">
-              <button type="button" className="btn-primary" onClick={() => onNavigate?.('start-apply')}>
-                Launch Workflow
+              <button type="button" className="btn-primary btn-primary-large" onClick={() => onNavigate?.('resume')}>
+                Start Apply
               </button>
-              <button type="button" className="btn-ghost" onClick={() => onNavigate?.('tracker')}>
-                Open Tracker
-              </button>
+              {hasApplications && (
+                <button type="button" className="btn-ghost" onClick={() => onNavigate?.('applications')}>
+                  View Applications
+                </button>
+              )}
             </div>
-          </div>
-
-          <div className="hero-aside panel-inset">
-            <div className="hero-aside-header">
-              <span className="section-kicker">AI activity</span>
-              <span className={`status-pill ${status?.online ? 'online' : 'offline'}`}>{status?.label}</span>
-            </div>
-            <div className="activity-list">
-              <div className="activity-item">
-                <span className="activity-dot glow-cyan" />
-                <div>
-                  <strong>Live workflow states</strong>
-                  <span>Queued, active, failed, and completed runs surface automatically.</span>
-                </div>
+            {hasApplications && (
+              <div className="hero-stats-inline">
+                <span className="hero-stat">
+                  <strong>{totalApplications}</strong> {totalApplications === 1 ? 'Application' : 'Applications'} Tracked
+                </span>
+                <span className="hero-stat-divider">•</span>
+                <span className="hero-stat">
+                  <strong>{counts.interviews}</strong> {counts.interviews === 1 ? 'Interview' : 'Interviews'}
+                </span>
               </div>
-              <div className="activity-item">
-                <span className="activity-dot glow-purple" />
-                <div>
-                  <strong>Execution telemetry</strong>
-                  <span>Progress, duration, ATS score, and last activity stay visible.</span>
-                </div>
+            )}
+          </div>
+
+          {hasApplications && (
+            <div className="hero-aside panel-inset">
+              <div className="hero-aside-header">
+                <span className="section-kicker">How it works</span>
               </div>
-              <div className="activity-item">
-                <span className="activity-dot glow-blue" />
-                <div>
-                  <strong>Automation ready</strong>
-                  <span>Prepared for future websockets, queues, and n8n monitoring.</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="stats-grid">
-        <StatCard label="Active workflows" value={overview.active} detail="Currently executing AI workflow stages." tone="cyan" />
-        <StatCard label="Completed" value={overview.completed} detail="Optimization-ready workflows." tone="purple" />
-        <StatCard label="Success rate" value={`${Math.round(analytics.workflow_success_rate || 0)}%`} detail="Filtered orchestration success across the current console view." tone="blue" />
-        <StatCard label="Failed" value={overview.failed} detail="Runs needing manual attention or retry." tone="danger" />
-      </section>
-
-      <section className="stats-grid compact-stats-grid">
-        <StatCard label="Avg execution" value={analytics.average_execution_seconds ? `${Math.round(analytics.average_execution_seconds)}s` : '--'} detail="Average workflow duration." tone="cyan" />
-        <StatCard label="ATS average" value={analytics.ats_score_trends?.average ?? '--'} detail="Current ATS trend across filtered workflows." tone="purple" />
-        <StatCard label="Queue depth" value={observability.orchestration_metrics?.queue_depth ?? 0} detail="Pending orchestration tasks in the local worker queue." tone="blue" />
-        <StatCard label="Workers" value={observability.worker_metrics?.total_workers ?? 0} detail="Registered local workers and lease-aware execution readiness." tone="cyan" />
-      </section>
-
-      <section className="panel-card mission-control-panel">
-        <WorkflowMissionControl
-          data={data}
-          loading={loading}
-          refreshing={refreshing}
-          error={error}
-          lastUpdated={lastUpdated}
-          connectionState={connectionState}
-          onRefresh={refreshNow}
-          filters={filters}
-          onFiltersChange={setFilters}
-        />
-      </section>
-
-      <section className="panel-grid two-column dashboard-bottom-grid">
-        <div className="panel-card">
-          <div className="panel-card-header">
-            <div>
-              <span className="section-kicker">Quick actions</span>
-              <h3>Move faster</h3>
-            </div>
-          </div>
-          <div className="quick-actions-grid">
-            <button type="button" className="quick-action-card" onClick={() => onNavigate?.('start-apply')}>
-              <strong>Start Apply</strong>
-              <span>Begin a multi-step resume and target-role workflow.</span>
-            </button>
-            <button type="button" className="quick-action-card" onClick={() => onNavigate?.('resume')}>
-              <strong>Review resume</strong>
-              <span>Open AI suggestions tailored to your latest target role.</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="panel-card">
-          <div className="panel-card-header">
-            <div>
-              <span className="section-kicker">Recent applications</span>
-              <h3>Latest application records</h3>
-            </div>
-          </div>
-          {recentItems.length === 0 ? (
-            <p className="muted-block">No applications yet. Your recent jobs will appear here.</p>
-          ) : (
-            <div className="recent-list">
-              {recentItems.map((item, index) => (
-                <div key={`${item.company}-${item.role}-${index}`} className="recent-item">
+              <div className="activity-list">
+                <div className="activity-item">
+                  <span className="activity-dot glow-cyan" />
                   <div>
-                    <strong>{item.company}</strong>
-                    <span>{item.role}</span>
+                    <strong>1. Upload resume</strong>
+                    <span>Add your latest resume in a few clicks.</span>
                   </div>
-                  <span className={`tracker-badge status-${item.status}`}>{item.status}</span>
                 </div>
-              ))}
+                <div className="activity-item">
+                  <span className="activity-dot glow-purple" />
+                  <div>
+                    <strong>2. Add job titles</strong>
+                    <span>Choose the roles you want the AI to target.</span>
+                  </div>
+                </div>
+                <div className="activity-item">
+                  <span className="activity-dot glow-blue" />
+                  <div>
+                    <strong>3. Track progress</strong>
+                    <span>Keep applications organized in one place.</span>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
       </section>
+
+      {/* First-Time User Onboarding */}
+      {!hasApplications && (
+        <section className="onboarding-card panel-card">
+          <div className="onboarding-content">
+            <div className="onboarding-icon">🚀</div>
+            <h3>Welcome to Your AI Job Assistant</h3>
+            <p>
+              Get started in minutes. Upload your resume, select the job roles you're targeting, 
+              and let AI handle the heavy lifting of job applications.
+            </p>
+            <div className="onboarding-features">
+              <div className="onboarding-feature">
+                <span className="feature-icon">✓</span>
+                <span>AI-optimized applications</span>
+              </div>
+              <div className="onboarding-feature">
+                <span className="feature-icon">✓</span>
+                <span>Automated job matching</span>
+              </div>
+              <div className="onboarding-feature">
+                <span className="feature-icon">✓</span>
+                <span>Track everything in one place</span>
+              </div>
+            </div>
+            <button type="button" className="btn-primary btn-primary-large" onClick={() => onNavigate?.('resume')}>
+              Get Started
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Quick Actions - Only show when user has applications */}
+      {hasApplications && (
+        <section className="quick-actions-section">
+          <h3 className="section-title">Quick Actions</h3>
+          <div className="quick-actions-grid-dashboard">
+            <button 
+              type="button" 
+              className="quick-action-card action-card-interactive"
+              onClick={() => onNavigate?.('resume')}
+            >
+              <div className="quick-action-icon">📄</div>
+              <strong>Start Apply</strong>
+              <span>Upload resume and apply to new roles</span>
+            </button>
+            <button 
+              type="button" 
+              className="quick-action-card action-card-interactive"
+              onClick={() => onNavigate?.('applications')}
+            >
+              <div className="quick-action-icon">📊</div>
+              <strong>View Applications</strong>
+              <span>Track all your job applications</span>
+            </button>
+            <button 
+              type="button" 
+              className="quick-action-card action-card-interactive"
+              onClick={() => onNavigate?.('resume')}
+            >
+              <div className="quick-action-icon">✏️</div>
+              <strong>Update Resume</strong>
+              <span>Replace or optimize your resume</span>
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Stats Grid - Only show when user has applications */}
+      {hasApplications && (
+        <section className="stats-grid">
+          <StatCard label="Applied" value={counts.applied} detail="Applications sent" tone="cyan" />
+          <StatCard label="Pending" value={counts.pending} detail="Being prepared" tone="purple" />
+          <StatCard label="Interviews" value={counts.interviews} detail="In progress" tone="blue" />
+          <StatCard label="Rejected" value={counts.rejected} detail="Closed" tone="danger" />
+        </section>
+      )}
+
+      {/* Recent Applications - Only show when user has applications */}
+      {hasApplications && (
+        <section className="panel-card recent-applications-card">
+          <div className="panel-card-header">
+            <div>
+              <span className="section-kicker">Recent activity</span>
+              <h3>Latest applications</h3>
+            </div>
+            <button 
+              type="button" 
+              className="btn-ghost btn-small"
+              onClick={() => onNavigate?.('applications')}
+            >
+              View All
+            </button>
+          </div>
+          {recentItems.length === 0 ? (
+            <p className="muted-block">No recent applications.</p>
+          ) : (
+            <div className="tracker-table">
+              <div className="tracker-row tracker-head">
+                <span>Company</span>
+                <span>Role</span>
+                <span>Status</span>
+                <span>Date</span>
+              </div>
+              {recentItems.map((item, index) => (
+                <div key={`${item.company}-${item.role}-${index}`} className="tracker-row">
+                  <span>{item.company}</span>
+                  <span>{item.role}</span>
+                  <span className={`tracker-badge status-${item.status}`}>{item.status}</span>
+                  <span>{item.application_date}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }

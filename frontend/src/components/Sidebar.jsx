@@ -1,9 +1,8 @@
 const NAV = [
-  { id: 'dashboard', label: 'Dashboard', icon: '◆', hint: 'Overview' },
-  { id: 'applications', label: 'Job Applications', icon: '◧', hint: 'Create' },
-  { id: 'resume', label: 'Resume Analyzer', icon: '△', hint: 'Improve' },
-  { id: 'cover-letter', label: 'Cover Letters', icon: '✦', hint: 'Refine' },
-  { id: 'tracker', label: 'Application Tracker', icon: '◎', hint: 'Track' },
+  { id: 'dashboard', label: 'Dashboard', icon: '◆', hint: 'Home' },
+  { id: 'applications', label: 'Applications', icon: '◎', hint: 'Track' },
+  { id: 'resume', label: 'Resume', icon: '△', hint: 'Start' },
+  { id: 'settings', label: 'Settings', icon: '✦', hint: 'Prefs' },
 ]
 
 export default function Sidebar({ page, onNavigate, collapsed, onToggle, status }) {
@@ -13,8 +12,8 @@ export default function Sidebar({ page, onNavigate, collapsed, onToggle, status 
         <span className="brand-icon">◈</span>
         {!collapsed && (
           <div className="brand-copy">
-            <strong>JobPilot AI</strong>
-            <span className="brand-sub">Application assistant</span>
+            <strong>Career Copilot</strong>
+            <span className="brand-sub">AI job application assistant</span>
           </div>
         )}
       </div>
@@ -25,12 +24,12 @@ export default function Sidebar({ page, onNavigate, collapsed, onToggle, status 
             <div className="sidebar-avatar">JP</div>
             <div>
               <div className="sidebar-user-name">Personal workspace</div>
-              <div className="sidebar-user-meta">Solo founder mode</div>
+              <div className="sidebar-user-meta">Focus on your next role</div>
             </div>
           </div>
           <div className="sidebar-status-row">
             <span className={`sidebar-dot ${status?.online ? 'online' : 'offline'}`} />
-            <span>{status?.online ? 'AI backend connected' : 'Backend unavailable'}</span>
+            <span>{status?.online ? 'Assistant ready' : 'Assistant offline'}</span>
           </div>
         </div>
       )}
